@@ -1,0 +1,21 @@
+<RCC>
+    <qresource prefix="/assets">
+        <file>images/logo.png</file>
+        <file>images/logo-splash-screen.png</file>
+        <file>images/logo-splash-screen-dark.png</file>
+        <file>images/no-image-placeholder.jpg</file>
+        <file>images/brand/youtube.png</file>
+        <file>images/brand/facebook.png</file>
+        <file>images/brand/instagram.png</file>
+        <file>images/brand/tiktok.png</file>
+        <file>images/brand/douyin.png</file>
+        <file>images/brand/kuaishou.png</file>
+        <file>images/drama/dramabox-logo.png</file>
+        <file>images/drama/reelshort-logo.png</file>
+        <file>images/drama/dramabite-logo.png</file>
+        <file>images/drama/shortmovs-logo.png</file>
+        <file>images/drama/rushshortstv-logo.png</file>
+        <file>images/drama/stardusttv-logo.png</file>
+        <file>images/drama/flickreels-logo.png</file>
+    </qresource>
+</RCC>

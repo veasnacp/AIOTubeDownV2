@@ -1,0 +1,12 @@
+{
+    "reportAttributeAccessIssue": "information",
+    "reportPropertyTypeMismatch": "information",
+    "reportOptionalMemberAccess": "information",
+    "reportArgumentType": "information",
+    "reportOperatorIssue": "information",
+    "reportReturnType": "information",
+    "reportCallIssue": "information",
+    "typeCheckingMode": "basic",
+    "reportSelfClsParameterName": "information",
+    "reportGeneralTypeIssues": "information"
+}
