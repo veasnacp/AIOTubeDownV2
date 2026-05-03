@@ -17,5 +17,8 @@
         <file>images/drama/rushshortstv-logo.png</file>
         <file>images/drama/stardusttv-logo.png</file>
         <file>images/drama/flickreels-logo.png</file>
+        <file>images/icons/download.png</file>
+        <file>images/icons/settings.png</file>
+        <file>images/icons/video-download.png</file>
     </qresource>
 </RCC>

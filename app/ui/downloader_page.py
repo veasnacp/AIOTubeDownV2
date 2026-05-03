@@ -22,6 +22,7 @@ from PySide6Addons import (
     qconfig,
 )
 
+from ..components.icons import FileIcon
 from ..components.override import CardWidget
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
@@ -108,19 +109,29 @@ class DownloaderPage(ScrollArea):
         self.file_detail_layout.setAlignment(Qt.AlignTop)
         self.main_layout.addWidget(self.file_detail)
 
+        class IconWidget(TransparentToolButton):
+            def setStyleSheet(self, styleSheet: str, /) -> None:
+                styleSheet = styleSheet + \
+                    "TransparentToolButton:hover,TransparentToolButton:pressed {background-color: transparent}"
+                return super().setStyleSheet(styleSheet)
+
+            def mousePressEvent(self, e):
+                self.isPressed = False
+
         # File Detail UI Elements
         self.thumbnail_area = SimpleCardWidget(self.file_detail)
         self.thumbnail_area.setFixedSize(240, 160)
         self.thumbnail_layout = QVBoxLayout(self.thumbnail_area)
-        self.thumbnail_icon = TransparentToolButton(
-            FluentIcon.DOCUMENT, self.thumbnail_area)
+        self.thumbnail_icon = IconWidget(
+            FileIcon.VIEW_FILE, self.thumbnail_area)
+
         self.thumbnail_icon.setIconSize(QSize(80, 80))
         self.thumbnail_layout.addWidget(self.thumbnail_icon, 0, Qt.AlignCenter)
         self.file_detail_layout.addWidget(self.thumbnail_area)
 
         self.filename_row = QHBoxLayout()
-        self.file_icon_small = TransparentToolButton(
-            FluentIcon.DOCUMENT, self.file_detail)
+        self.file_icon_small = IconWidget(
+            FileIcon.VIEW_FILE, self.file_detail)
         self.file_icon_small.setIconSize(QSize(24, 24))
         self.filename_label = CaptionLabel("No selection", self.file_detail)
         self.filename_label.setWordWrap(True)
@@ -194,6 +205,7 @@ class DownloaderPage(ScrollArea):
         self.action_panel.stop_clicked.connect(self.stop_selected)
         self.action_panel.stop_all_clicked.connect(manager.stop_all)
         self.action_panel.delete_clicked.connect(self.remove_selected_tasks)
+        self.action_panel.delete_all_clicked.connect(self.remove_all_tasks)
 
         # self.update_theme()
         # qconfig.themeChanged.connect(self.update_theme)
@@ -220,7 +232,9 @@ class DownloaderPage(ScrollArea):
     def add_url_test(self):
         dialog = AddUrlDialog(self.window())
         if dialog.exec():
-            urls = dialog.get_urls()
+            urls, invalid_urls = dialog.get_urls()
+            if len(urls) == 0:
+                return
             options = dialog.get_options()
             extract_manager.start_extraction(urls)
             extract_manager.options = options
@@ -236,6 +250,14 @@ class DownloaderPage(ScrollArea):
                     manager.remove_task(item.data(Qt.UserRole))
         self.download_table.load_tasks()
 
+    def remove_all_tasks(self):
+        rows = self.download_table.rowCount()
+        for row in range(rows):
+            item = self.download_table.item(row, 0)
+            if item:
+                manager.remove_task(item.data(Qt.UserRole))
+        self.download_table.load_tasks()
+
     def filter_tasks(self, index=None):
         item = self.tabs.currentItem()
         if not item:
@@ -248,13 +270,13 @@ class DownloaderPage(ScrollArea):
             row_status = cell.text()
             if target_text == "All":
                 self.download_table.setRowHidden(row, False)
-            elif target_text == "Downloading" and row_status == "Downloading":
+            elif target_text == "Downloading" and row_status in ["Downloading", "⏳"]:
                 self.download_table.setRowHidden(row, False)
-            elif target_text == "Completed" and row_status == "Completed":
+            elif target_text == "Completed" and row_status in ["Completed", "✅"]:
                 self.download_table.setRowHidden(row, False)
             elif target_text == "Uncompleted":
-                is_uncompleted = row_status in [
-                    "Stopped", "Error", "Cancelled", "Queued"]
+                is_uncompleted = row_status.lower() in [
+                    "stopped", "error", "cancelled", "queued", "❌"]
                 self.download_table.setRowHidden(row, not is_uncompleted)
             else:
                 self.download_table.setRowHidden(row, True)
@@ -312,8 +334,7 @@ class DownloaderPage(ScrollArea):
                 manager.add_task(
                     url, filename, options['path'],
                     category=options['category'], info=info,
-                    options={
-                        "resolution": options['resolution'], "mp3": options['mp3']}
+                    options=options
                 )
                 task_data = {
                     'id': task_id, 'url': url, 'filename': filename,
@@ -347,13 +368,17 @@ class DownloaderPage(ScrollArea):
         count = len(selected_rows)
 
         if count == 0:
+            self.action_panel.stop_btn.setDisabled(True)
+            self.action_panel.del_btn.setDisabled(True)
             self.filename_label.setText("No selection")
             self.thumbnail_area.hide()
             self.details_container.hide()
             # self.share_btn.hide()
             self.properties_btn.hide()
-            self.thumbnail_icon.setIcon(FluentIcon.DOCUMENT)
+            self.thumbnail_icon.setIcon(FileIcon.VIEW_FILE)
         elif count == 1:
+            self.action_panel.stop_btn.setDisabled(False)
+            self.action_panel.del_btn.setDisabled(False)
             self.thumbnail_area.show()
             row = selected_rows[0].row()
             item = self.download_table.item(row, 0)
@@ -361,12 +386,14 @@ class DownloaderPage(ScrollArea):
                 task_id = item.data(Qt.UserRole)
                 self.update_file_detail(task_id)
         else:
+            self.action_panel.stop_btn.setDisabled(False)
+            self.action_panel.del_btn.setDisabled(False)
             self.filename_label.setText(f"{count} tasks selected")
             self.thumbnail_area.hide()
             self.details_container.hide()
             # self.share_btn.show()  # Maybe show bulk actions
             self.properties_btn.hide()
-            self.thumbnail_icon.setIcon(FluentIcon.FOLDER)
+            self.thumbnail_icon.setIcon(FileIcon.DOCUMENTS)
 
     def update_file_detail(self, task_id):
         conn = db.get_connection()
@@ -402,8 +429,8 @@ class DownloaderPage(ScrollArea):
             self.properties_btn.show()
 
             # Set icon based on extension if possible
-            self.thumbnail_icon.setIcon(FluentIcon.VIDEO if ext in [
-                                        'MP4', 'MKV', 'AVI'] else FluentIcon.MUSIC if ext == 'MP3' else FluentIcon.DOCUMENT)
+            self.thumbnail_icon.setIcon(FileIcon.VIDEO_FILE if ext in [
+                                        'MP4', 'MKV', 'AVI'] else FluentIcon.MUSIC if ext == 'MP3' else FileIcon.VIEW_FILE)
             self.file_icon_small.setIcon(self.thumbnail_icon.icon())
 
     def on_extract_error(self, task_id, d):

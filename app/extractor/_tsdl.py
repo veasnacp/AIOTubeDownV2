@@ -320,7 +320,6 @@ class AsyncTSVideoDownloader(AsyncBaseRequest):
 
                         # check cancelled status from req_kwargs
                         if self.cancelled:
-                            self.logger.info("Download cancelled")
                             return None
 
                         if self.chunk_size:
@@ -328,7 +327,10 @@ class AsyncTSVideoDownloader(AsyncBaseRequest):
                                 async for chunk in response.aiter_content(chunk_size=self.chunk_size):
                                     # check cancelled status from req_kwargs
                                     if self.cancelled:
-                                        self.logger.info("Download cancelled")
+                                        try:
+                                            file_path.unlink()
+                                        except:
+                                            pass
                                         return None
 
                                     if chunk:
@@ -349,9 +351,9 @@ class AsyncTSVideoDownloader(AsyncBaseRequest):
                                 await f.write(response.content)
                         return file_path
                     else:
-                        self.logger.error(
-                            f"❌ Failed to download segment {index}: HTTP {response.status_code}")
-
+                        if not (hasattr(self, 'with_custom_response') and self.with_custom_response):
+                            self.logger.error(
+                                f"❌ Failed to download segment {index}: HTTP {response.status_code}")
                 except Exception as e:
                     self.logger.error(
                         f"❌ Error downloading segment {index} (attempt {attempt + 1}/{retries}): {e}")
@@ -678,8 +680,20 @@ class AsyncTSVideoDownloader(AsyncBaseRequest):
                 self.logger.error("No segments were downloaded successfully")
                 return False
 
+            total_url = len(url_list)
+            if hasattr(self, 'with_custom_response') and self.with_custom_response:
+                total_url = len(completed_files)
+
             self.logger.info(
-                f"Successfully downloaded {len(completed_files)}/{len(url_list)} urls")
+                f"Successfully downloaded {len(completed_files)}/{total_url} urls")
+
+            if self.cancelled:
+                try:
+                    for file in completed_files:
+                        Path(file).unlink(missing_ok=True)
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up temp files: {e}")
+                return False
 
             return completed_files
 
@@ -703,6 +717,8 @@ class AsyncTSVideoDownloader(AsyncBaseRequest):
 
         try:
             self.logger.debug(f'm3u8Url = {m3u8_url}')
+            if custom_response:
+                self.with_custom_response = True
             # Fetch the m3u8 playlist asynchronously
             response = custom_response or await self.request(
                 m3u8_url,
@@ -745,6 +761,10 @@ class AsyncTSVideoDownloader(AsyncBaseRequest):
 
             self.logger.info(
                 f"Successfully downloaded {len(ts_files)}/{len(segments)} segments")
+
+            if self.cancelled:
+                await self.cleanup_temp_files()
+                return False
 
             if overwrite and Path(output_file).exists() and Path(output_file).is_file():
                 self.logger.info(f"🗑️ Override existing file: {output_file}")

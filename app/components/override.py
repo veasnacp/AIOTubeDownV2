@@ -1,20 +1,33 @@
 from typing import Optional, Union
 
-from PySide6.QtCore import QPoint, QRectF, Qt
-from PySide6.QtGui import QColor, QMouseEvent, QPainter
+from PySide6.QtCore import QPoint, QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QIcon, QMouseEvent, QPainter
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 from PySide6Addons import CheckableMenu as FluentCheckableMenu
-from PySide6Addons import ComboBox, LineEdit, MenuAnimationType, MenuIndicatorType
+from PySide6Addons import ComboBox
+from PySide6Addons import FluentIcon as FIF
+from PySide6Addons import FluentIconBase, LineEdit, MenuAnimationType, MenuIndicatorType
 from PySide6Addons import MessageBoxBase as FluentMessageBoxBase
+from PySide6Addons import NavigationBar as FluentNavigationBar
+from PySide6Addons import NavigationBarPushButton as FluentNavigationBarPushButton
+from PySide6Addons import NavigationItemPosition
 from PySide6Addons import RoundMenu as FluentRoundMenu
 from PySide6Addons import SegmentedItem as SimpleSegmentedItem
 from PySide6Addons import SegmentedWidget, SimpleCardWidget, SpinBox, TextEdit
 from PySide6Addons import ToolTip as QFTooltip
-from PySide6Addons import ToolTipFilter, ToolTipPosition, isDarkTheme, themeColor
+from PySide6Addons import (
+    ToolTipFilter,
+    ToolTipPosition,
+    drawIcon,
+    isDarkTheme,
+    setFont,
+    themeColor,
+)
+from PySide6Addons.common.color import autoFallbackThemeColor
 from PySide6Addons.components.widgets.combo_box import ComboBoxMenu
 from PySide6Addons.components.widgets.menu import LineEditMenu, TextEditMenu
 
-from ..theme import DarkMode, LightMode
+from ..theme import Colors, DarkMode, LightMode
 
 
 class ToolTip(QFTooltip):
@@ -344,3 +357,90 @@ MainWindow MessageBoxBase, MainWindow MessageBoxBase #centerWidget {{ background
 MainWindow[theme=dark] MessageBoxBase, MainWindow[theme=dark] MessageBoxBase #centerWidget {{ background-color: {DarkMode.card}; border: 1px solid rgba(144, 144, 142, 0.2);}}
 """
         return super().setStyleSheet(styleSheet)
+
+
+class NavigationBarPushButton(FluentNavigationBarPushButton):
+    def __init__(self, icon: Union[str, QIcon, FIF], text: str, isSelectable: bool, selectedIcon=None, parent=None):
+        super().__init__(icon, text, isSelectable, selectedIcon, parent)
+        self.isCompacted = False
+        self.lightSelectedTextColor = QColor(Colors.black)
+        self.darkSelectedTextColor = self.darkSelectedColor
+
+    def _drawIcon(self, painter: QPainter):
+        # if (self.isPressed or not self.isEnter) and not (self.isSelected or self.isAboutSelected):
+        #     painter.setOpacity(0.6)
+        if not self.isEnabled():
+            painter.setOpacity(0.4)
+
+        if self._isSelectedTextVisible:
+            rect = QRectF(16, 6, 30, 30)
+        else:
+            rect = QRectF(16, 6 + self.iconAni.offset, 30, 30)
+
+        selectedIcon = self._selectedIcon or self._icon
+
+        if isinstance(selectedIcon, FluentIconBase) and (self.isSelected or self.isAboutSelected):
+            color = autoFallbackThemeColor(
+                self.lightSelectedColor, self.darkSelectedColor)
+            selectedIcon.render(painter, rect, fill=color.name())
+        elif self.isSelected or self.isAboutSelected:
+            drawIcon(selectedIcon, painter, rect)
+        else:
+            drawIcon(self._icon, painter, rect)
+
+    def _drawText(self, painter: QPainter):
+        if self.isSelected and not self._isSelectedTextVisible:
+            return
+
+        if self.isSelected or self.isAboutSelected:
+            painter.setPen(autoFallbackThemeColor(
+                self.lightSelectedTextColor or self.lightSelectedColor,
+                self.darkSelectedTextColor or self.darkSelectedColor
+            ))
+        else:
+            painter.setPen(Qt.white if isDarkTheme() else Qt.black)
+
+        painter.setFont(self.font())
+        rect = QRect(0, 32, self.width(), 26)
+        painter.drawText(rect, Qt.AlignCenter, self.text())
+
+
+class NavigationBar(FluentNavigationBar):
+    def insertItem(self, index: int, routeKey: str, icon: Union[str, QIcon, FluentIconBase], text: str, onClick=None,
+                   selectable=True, selectedIcon=None, position=NavigationItemPosition.TOP):
+        """ insert navigation tree item
+
+        Parameters
+        ----------
+        index: int
+            the insert position of parent widget
+
+        routeKey: str
+            the unique name of item
+
+        icon: str | QIcon | FluentIconBase
+            the icon of navigation item
+
+        text: str
+            the text of navigation item
+
+        onClick: callable
+            the slot connected to item clicked signal
+
+        selectable: bool
+            whether the item is selectable
+
+        selectedIcon: str | QIcon | FluentIconBase
+            the icon of navigation item in selected state
+
+        position: NavigationItemPosition
+            where the button is added
+        """
+        if routeKey in self.items:
+            return
+
+        w = NavigationBarPushButton(icon, text, selectable, selectedIcon, self)
+        w.setSelectedColor(self.lightSelectedColor, self.darkSelectedColor)
+        w.setSelectedTextVisible(self.isSelectedTextVisible())
+        self.insertWidget(index, routeKey, w, onClick, position)
+        return w

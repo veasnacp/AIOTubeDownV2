@@ -2,14 +2,13 @@ import os
 import sqlite3
 
 from loguru import logger
-from platformdirs import user_data_dir
 
-from ..config.constants import APP_NAME, DB_NAME
+from ..config.constants import DB_NAME, DIRS
 
 
 class Database:
     def __init__(self):
-        db_dir = user_data_dir(APP_NAME)
+        db_dir = str(DIRS.user_data_dir)
         os.makedirs(db_dir, exist_ok=True)
         self.db_path = os.path.join(db_dir, DB_NAME)
         self.init_db()
@@ -57,7 +56,7 @@ class Database:
 
         conn.commit()
         conn.close()
-        # logger.info(f"Database initialized at {self.db_path}")
+        logger.debug(f"Database initialized at {self.db_path}")
 
     def add_task(self, url, filename, save_path, category="Other", status="Queued", segments=1, priority="Normal", metadata_json=None):
         conn = self.get_connection()
@@ -65,7 +64,7 @@ class Database:
         cursor.execute('''
             INSERT INTO downloads (url, filename, save_path, category, status, segments, priority, metadata_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (url, filename, save_path, category, status, segments, priority, metadata_json))
+        ''', (url or 'unknown', filename, save_path, category, status, segments, priority, metadata_json))
         conn.commit()
         last_id = cursor.lastrowid
         conn.close()

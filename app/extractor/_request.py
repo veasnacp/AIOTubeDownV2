@@ -16,6 +16,8 @@ from curl_cffi.requests import (
 # import logging
 from loguru import logger
 
+from ..config.constants import APP_NAME, DIRS
+
 # logger = logging.getLogger(__name__)
 current_dir = Path(__file__).parent
 
@@ -364,7 +366,7 @@ class ExtractorBase(AsyncBaseRequest):
         if output_dir:
             _output_dir = Path(output_dir)
         else:
-            _output_dir = Path.home().joinpath("Downloads", "PhumDownloader")
+            _output_dir = DIRS.user_downloads_path.joinpath(APP_NAME)
         if with_site_name:
             _output_dir = _output_dir.joinpath(
                 self._CLOUD_FOLDER.split("/")[-1])

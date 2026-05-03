@@ -100,8 +100,10 @@ class DownloadWorker(QRunnable):
         self.signals = WorkerSignals()
         self._is_paused = False
         self._is_cancelled = False
-        self._is_video = "youtube.com" in url or "youtu.be" in url or "vimeo.com" in url
-        self._is_douyin = "douyin.com" in url or "iesdouyin.com" in url
+        self._is_video = "youtube.com" in str(
+            url) or "youtu.be" in str(url) or "vimeo.com" in str(url)
+        self._is_douyin = "douyin.com" in str(
+            url) or "iesdouyin.com" in str(url)
         self.chunk_size = 10485760
 
     @Slot()
@@ -253,6 +255,14 @@ class DownloadWorker(QRunnable):
 
         if self.info:
             filename = self.info.get("title", filename)
+            extractor_key = self.info.get('extractor_key')
+            uploader = self.info.get('uploader')
+            if self.options.get('with_site', False) and extractor_key:
+                self.output_dir = os.path.join(
+                    self.output_dir, f"{extractor_key}")
+            if self.options.get('with_username', False) and uploader:
+                self.output_dir = os.path.join(self.output_dir, f"{uploader}")
+
         if filename:
             outtmpl = os.path.join(self.output_dir, f'{filename}.%(ext)s')
         else:
@@ -290,8 +300,11 @@ class DownloadWorker(QRunnable):
                 if self.info:
                     _info, is_both, video_url, audio_url = self.select_format_for_yt_dlp(
                         int(res))
+                    logger.debug(
+                        f"_info: {_info.get('url')}, is_both: {is_both}, video_url: {video_url}, audio_url: {audio_url}")
                     video_url = video_url or self.info['url']
-                    info = ydl.extract_info(video_url, download=True)
+                    info = ydl.extract_info(
+                        video_url, download=True)
                     if not is_both and audio_url:
                         video_path_for_merge = ydl.prepare_filename(info)
                         final_path = self.merge_video_and_audio(
@@ -452,7 +465,7 @@ class DownloadWorker(QRunnable):
             height = f.get('height', 0)
             resolution_compare = height if width >= height else width
             if f.get('ext') == 'mp4' and resolution_compare <= resolution:
-                print('resolution', resolution_compare)
+                logger.debug('resolution', resolution_compare)
                 video_url = f.get('url')
                 video_info = f
                 break
@@ -463,14 +476,14 @@ class DownloadWorker(QRunnable):
                 height = f.get('height', 0)
                 resolution_compare = height if width >= height else width
                 if len(info['both']) == 1:
-                    print('resolution both 1', resolution_compare)
+                    logger.debug('resolution both 1', resolution_compare)
                     video_url = f.get('url')
                     video_info = f
                     video_info['is_both'] = True
                     break
 
                 if resolution_compare <= resolution:
-                    print('resolution both 2', resolution_compare)
+                    logger.debug('resolution both 2', resolution_compare)
                     video_url = f.get('url')
                     video_info = f
                     video_info['is_both'] = True

@@ -2,6 +2,7 @@ import asyncio
 import base64
 import binascii
 import json
+import math
 import re
 import uuid
 from asyncio import Semaphore
@@ -156,6 +157,8 @@ class DramaExtractorBase(ExtractorBase):
             downloader_settings_callback(downloader)
 
         for attempt in range(max_attempts):
+            if downloader.cancelled:
+                break
             self.logger.info(
                 f"\nDownload attempt {attempt + 1}/{max_attempts}")
 
@@ -222,14 +225,15 @@ class DramaExtractorBase(ExtractorBase):
     ):
         # downloader = AsyncTSVideoDownloader(max_concurrent=5)
         self.active_downloader = downloader
+        self.cancel_download = False
         downloader.cancelled = self.cancel_download
         _output_dir = self.set_output_dir(output_dir, with_site_name)
         # test 2 episodes
         chapters = info['chapterList'][0:1] if is_test else info['chapterList']
         title = info.get('title') or info.get('book_title') or info['book_id']
-
         success_data = []
         error_data = []
+        _keys_chaper_info = keys_chaper_info.copy()
         for chapter in chapters:
             if self.cancel_download:
                 self.logger.info("Download process stopped by user")
@@ -238,11 +242,11 @@ class DramaExtractorBase(ExtractorBase):
             for key, value in keys_chaper_info.items():
                 if key != "custom_temp_segments_dir_name" and callable(value):
                     chapter[key] = value(chapter)
-                    keys_chaper_info[key] = key
+                    _keys_chaper_info[key] = key
 
-            chapter_id = chapter[keys_chaper_info["temp_segments_dir_name"]]
+            chapter_id = chapter[_keys_chaper_info["temp_segments_dir_name"]]
             temp_segments_dir_name = chapter_id
-            custom_temp_segments_dir_name = keys_chaper_info.get(
+            custom_temp_segments_dir_name = _keys_chaper_info.get(
                 "custom_temp_segments_dir_name")
             if bool(custom_temp_segments_dir_name):
                 if callable(custom_temp_segments_dir_name):
@@ -250,8 +254,11 @@ class DramaExtractorBase(ExtractorBase):
                         chapter)
                 else:
                     temp_segments_dir_name = chapter[custom_temp_segments_dir_name]
-            episode_index = int(chapter[keys_chaper_info["episode_number"]])
-            if episode_index == 0 or not chapter.get(keys_chaper_info["video_url"]):
+
+            episode_index = int(chapter[_keys_chaper_info["episode_number"]])
+            m3u8_url = chapter.get(_keys_chaper_info["video_url"])
+
+            if episode_index == 0 or not m3u8_url:
                 continue
             suffix_name = f"_EP{episode_index:02d}"
             filename = safe_filename(
@@ -260,7 +267,7 @@ class DramaExtractorBase(ExtractorBase):
             output_file = _output_dir.joinpath(title_folder, filename)
             success = await self.download_m3u8_url(
                 downloader,
-                chapter[keys_chaper_info["video_url"]],
+                m3u8_url,
                 chapter,
                 temp_segments_dir_name,
                 str(output_file),
@@ -294,6 +301,7 @@ class DramaBoxExtractor(DramaExtractorBase):
     _BUILD_ID = "dramaboxdb_prod_20260423"
     _LINK_GET_BUILD_ID = f"{_BASE_URL}/downloadapp"
     _CLOUD_FOLDER = "drama/dramabox"
+    _resolution = "720p"
 
     def _get_build_id(self):
         response = self.session_sync.get(self._LINK_GET_BUILD_ID)
@@ -353,24 +361,14 @@ class DramaBoxExtractor(DramaExtractorBase):
         return info.get('cover', '')
 
     def get_video_url_play(self, chapter: dict, resolution: str = "720p"):
+        if bool(chapter.get('m3u8Url')):
+            return chapter['m3u8Url']
         return self.get_video_resolution(chapter['cover'])[resolution]
 
     async def get_drama_info(self, url: str):
         url, drama_id_with_title_slug = self.get_drama_id_slug_title(url)
         drama_id = drama_id_with_title_slug.split('/')[0]
-        # cached_info = await self.check_cloud_cache(drama_id)
-        # if cached_info:
-        #     return cached_info
 
-        # resp = await self.request(url, impersonate=impersonate, retries=0)
-        # if not resp or not isinstance(resp, Response) and "error" in resp:
-        #     if not resp:
-        #         print(f"Error fetching video info: No response received for {url}")
-        #     else:
-        #         print(f"Error fetching video info: {resp['error']}")
-        #     return None
-
-        # redirected_url = resp.headers.get("Location") or resp.url
         json_url = f"{self._BASE_URL}/_next/data/{self._BUILD_ID}/en/movie/{drama_id_with_title_slug}.json"
         if self._IS_TESTING:
             self.logger.debug(f"[!] 🔍 Fetching video info from: {json_url}")
@@ -430,8 +428,9 @@ class DramaBoxExtractor(DramaExtractorBase):
             output_file = f"{temp_segments_dir_name}.mp4"
 
         def pattern(content: str):
+            # 570896434.720p-00001.ts
             ts_urls = re.findall(
-                r'#EXTINF:.*\n([^\s"\'<>]+?-[a-zA-Z]+-\d+\.ts)', content)
+                r'#EXTINF:.*\n([^\s"\'<>]+?.[a-zA-Z]+-\d+\.ts)', content)
             if ts_urls and 'https://' not in ts_urls[0]:
                 ts_urls = [parent_url_path + ts_url for ts_url in ts_urls]
             return ts_urls
@@ -441,21 +440,28 @@ class DramaBoxExtractor(DramaExtractorBase):
 
         class CustomResponse:
             def __init__(self):
-                # range 20 episodes
+                episode_range = 20
+                duration = chapter.get('duration')
+                if isinstance(duration, int) and duration > 60000:
+                    episode_range = int(math.ceil(duration / 1000 / 7)) + 2
+
                 episode_ts = []
-                for i in range(20):
+                for i in range(episode_range):
                     ts_url_next = '#EXTINF:6.640000,\n'
                     ts_url_next += _self.get_video_ts(
-                        chapter['cover'], i+1, '720p')
+                        chapter['cover'], i+1, _self._resolution)
                     episode_ts.append(ts_url_next)
                 self.text = (
                     "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ALLOW-CACHE:YES\n#EXT-X-TARGETDURATION:11\n#EXT-X-MEDIA-SEQUENCE:0\n"
                     + '\n'.join(episode_ts)
                     + "\n#EXT-X-ENDLIST"
                 )
-
-        if chapter.get('m3u8Url'):
+        has_m3u8 = bool(chapter.get('m3u8Url'))
+        if has_m3u8:
             m3u8_url = chapter['m3u8Url']
+            self.logger.debug(f"[!] ✅ Found m3u8 url for {chapter['id']}")
+        else:
+            self.logger.debug(f"[!] ⚠️  No m3u8 url for {chapter['id']}")
 
         success = await self.download_m3u8(
             downloader,
@@ -465,7 +471,7 @@ class DramaBoxExtractor(DramaExtractorBase):
             temp_segments_dir_name,
             max_attempts,
             progress_callback,
-            custom_response=CustomResponse()
+            custom_response=None if has_m3u8 else CustomResponse()
         )
         return success
 
@@ -814,10 +820,11 @@ class DramaBiteExtractor(DramaExtractorBase):
         path = entry.get('cover') or entry.get('video_cover')
         if path:
             path = self._get_abs_image(path)
-            if isinstance(resize, str) and resize:
-                path += f"?x-oss-process=image/resize,m_fill,{resize}"
-            elif resize:
-                path += "?x-oss-process=image/resize,m_fill,h_634,w_476"
+            if "?" not in path:
+                if isinstance(resize, str) and resize:
+                    path += f"?x-oss-process=image/resize,m_fill,{resize}"
+                elif resize:
+                    path += "?x-oss-process=image/resize,m_fill,h_634,w_476"
             return path
         return ''
 
@@ -924,7 +931,7 @@ class DramaBiteExtractor(DramaExtractorBase):
                 for chapter_info in chunk:
                     episode_id = chapter_info['vid']
                     if self._IS_TESTING:
-                        self.logger.info(
+                        self.logger.debug(
                             f"[!] 🔍 Fetching video info for episode: {episode_id}")
                     tasks.append(tg.create_task(
                         self._get_chapter_info(drama_id, episode_id)))
@@ -1059,7 +1066,7 @@ class DramaBiteExtractor(DramaExtractorBase):
         self.logger.debug(f"Video URL: {video_url}, {drama_id}")
         info = await self.get_drama_info(url)
         if info:
-            info['video_cover'] = self.get_episode_cover_url(info, True)
+            info['video_cover'] = self.get_cover_url(info)
             info = await self.update_all_episodes(info)
             for episode in info['chapterList']:
                 link_info = episode.get('link_info')
@@ -1093,6 +1100,9 @@ class ShortMovsExtractor(DramaExtractorBase):
 
     def get_cover_url(self, info: dict) -> str:
         return info.get('video_cover', '')
+
+    def get_video_url_play(self, chapter: dict) -> str:
+        return chapter.get('video_url', '')
 
     async def _get_html(self, url: str):
         resp = await self.request(url)
@@ -1175,7 +1185,7 @@ class ShortMovsExtractor(DramaExtractorBase):
         url = self._LINK_EP % (drama_id, episode_id)
         html = await self._get_html(url)
         if not html:
-            print("[!] ❌ Error fetching drama info")
+            self.logger.debug("[!] ❌ Error fetching drama info")
             return None
 
         return {
@@ -1232,7 +1242,7 @@ class ShortMovsExtractor(DramaExtractorBase):
         html = await self._get_html(url)
 
         if not html:
-            print("[!] ❌ Error fetching drama info")
+            self.logger.debug("[!] ❌ Error fetching drama info")
             return None
 
         # get text for class "episode-list" first
@@ -1286,7 +1296,7 @@ class ShortMovsExtractor(DramaExtractorBase):
                 for chapter_info in chunk:
                     episode_id = chapter_info['id']
                     if self._IS_TESTING:
-                        self.logger.info(
+                        self.logger.debug(
                             f"[!] 🔍 Fetching video info for episode: {episode_id}")
                     tasks.append(tg.create_task(
                         self._get_chapter_info(drama_id, episode_id)))
@@ -1370,117 +1380,6 @@ class ShortMovsExtractor(DramaExtractorBase):
             progress_callback=progress_callback,
             is_test=is_test
         )
-
-    # def test_download_m3u8_v2(self, m3u8_url: str = '', dest_path: str = '', label: str = ""):
-    #     """Download ShortMovs M3U8 stream using cloudscraper (CF-bypass CDN)."""
-    #     try:
-    #         import cloudscraper as _cs
-    #     except ImportError:
-    #         raise RuntimeError("cloudscraper not installed")
-
-    #     # m3u8_url = "https://oss.shortmovs.com/c05345a03e2374e10984a6c2611ab129/ba5e46d3_005/index.m3u8"
-    #     m3u8_url = "https://oss.shortmovs.com/c05345a03e2374e10984a6c2611ab129/7d8693ef_004/index.m3u8"
-    #     dest_path = "__final_video"
-
-    #     self.logger.info(f"📥 Downloading {label}…")
-
-    #     cs = self._cloudscraper if hasattr(self, '_cloudscraper') else None
-    #     if cs is None:
-    #         cs = _cs.create_scraper(
-    #             browser={"browser": "chrome",
-    #                      "platform": "android", "desktop": False}
-    #         )
-    #         self._cloudscraper = cs
-
-    #     hdrs = {"Referer": "https://www.shortmovs.com/",
-    #             "Origin": "https://www.shortmovs.com"}
-
-    #     # Fetch M3U8 playlist
-    #     resp = cs.get(m3u8_url, timeout=30, headers=hdrs)
-    #     if resp.status_code != 200:
-    #         raise RuntimeError(f"M3U8 fetch failed: HTTP {resp.status_code}")
-    #     playlist = resp.text
-
-    #     # Handle master playlist — pick best quality
-    #     segment_urls = []
-    #     if "#EXTM3U" in playlist:
-    #         for m in re.finditer(
-    #             rf'https?://t\.shortmovs\.com/[^\s"\'<>]+?segment_\d+\.ts',
-    #             playlist,
-    #         ):
-    #             segment_urls.append(m.group(0))
-
-    #         if not segment_urls:
-    #             self.logger.info(f"❌ No streams found")
-    #             return None
-    #         # if segment_urls:
-    #         #     print(segment_urls)
-    #             # segment_urls.sort(key=lambda x: int(x[0]), reverse=True)
-    #             # best = segment_urls[0][1].strip()
-    #             # if not best.startswith("http"):
-    #             #     best = m3u8_url.rsplit("/", 1)[0] + "/" + best
-    #             # return self._shortmovs_download_m3u8(best, dest_path, label)
-
-    #     # Parse segment URLs
-    #     # segments = re.findall(r'^(?!#)(.+\.ts[^\n]*)', playlist, re.MULTILINE)
-    #     # if not segments:
-    #     #     segments = re.findall(r'^(?!#)([^\n]+)', playlist, re.MULTILINE)
-    #     # segments = [s.strip() for s in segments if s.strip()]
-
-    #     # if not segments:
-    #     #     raise RuntimeError("No segments found in M3U8 playlist")
-
-    #     base = m3u8_url.rsplit("/", 1)[0]
-    #     total = len(segment_urls)
-    #     self.logger.info(f"Downloading {total} segments…")
-
-    #     # Ensure .ts extension for dest
-    #     dest_path = re.sub(r'\.mp4$', '.ts', dest_path)
-    #     dest_dir = os.path.dirname(dest_path) or "."
-    #     os.makedirs(dest_dir, exist_ok=True)
-
-    #     import shutil as _shutil
-    #     import tempfile
-    #     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".ts", dir=dest_dir)
-    #     os.close(tmp_fd)
-
-    #     try:
-    #         with open(tmp_path, "wb") as out:
-    #             for i, seg in enumerate(segment_urls):
-    #                 seg_url = seg if seg.startswith(
-    #                     "http") else f"{base}/{seg}"
-    #                 for attempt in range(3):
-    #                     try:
-    #                         r = cs.get(seg_url, timeout=30, headers=hdrs)
-    #                         r.raise_for_status()
-    #                         out.write(r.content)
-    #                         break
-    #                     except Exception as e:
-    #                         if attempt == 2:
-    #                             self.logger.warning(
-    #                                 f"[ShortMovs] segment {i} failed: {e}")
-    #                 # Progress
-    #                 pct = int((i + 1) / total * 100)
-    #                 self.logger.info(f"Progress: {pct}%")
-    #                 if (i + 1) % 20 == 0 or i + 1 == total:
-    #                     self.logger.info(f"Segment {i+1}/{total}")
-
-    #         fsize = os.path.getsize(tmp_path)
-    #         if fsize < 1024:
-    #             raise RuntimeError(
-    #                 f"Downloaded file too small ({fsize} bytes)")
-
-    #         if os.path.exists(dest_path):
-    #             os.remove(dest_path)
-    #         _shutil.move(tmp_path, dest_path)
-    #         self.logger.info(f"✅ Saved ({fsize // 1024:,} KB): {dest_path}")
-    #     except Exception:
-    #         if os.path.exists(tmp_path):
-    #             try:
-    #                 os.remove(tmp_path)
-    #             except OSError:
-    #                 pass
-    #         raise
 
     async def download_segment_async(self, ts_url: str, index: int, retries: int = 1):
         """Download a single TS segment asynchronously with retry logic"""

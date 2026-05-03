@@ -35,7 +35,7 @@ from PySide6Addons import (
 
 from ..common import resource_rc
 from ..components import FileIcon
-from ..components.override import CardWidget, RoundMenu
+from ..components.override import CardWidget, NavigationBar, RoundMenu
 from ..config.constants import APP_VERSION_BETA
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
@@ -131,6 +131,10 @@ class MainWindow(MSFluentWindow):
         self._darkBackgroundColor = QColor(DarkMode.card)
 
         self.titleBar: MSFluentTitleBar = self.titleBar
+        self.hBoxLayout.removeWidget(self.navigationInterface)
+        self.navigationInterface.deleteLater()
+        self.navigationInterface = NavigationBar(self)
+        self.hBoxLayout.insertWidget(0, self.navigationInterface)
 
         self.setWindowTitle(APP_VERSION_BETA)
 
@@ -175,11 +179,11 @@ class MainWindow(MSFluentWindow):
         self.settings_interface = SettingsPage(self)
 
         self.addSubInterface(self.downloader_page,
-                             FluentIcon.DOWNLOAD, "Download")
+                             FileIcon.DOWNLOAD, "Download")
         self.addSubInterface(self.drama_downloader_page,
-                             FluentIcon.MOVIE, "Drama")
+                             FileIcon.VIDEO_DOWNLOAD, "Drama")
         self.addSubInterface(self.settings_interface,
-                             FluentIcon.SETTING, "Settings", position=NavigationItemPosition.BOTTOM)
+                             FileIcon.SETTINGS, "Settings", position=NavigationItemPosition.BOTTOM)
 
     def init_title_bar_menus(self):
         self.titleBar.setAttribute(Qt.WA_StyledBackground)

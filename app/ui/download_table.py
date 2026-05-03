@@ -203,7 +203,13 @@ class DownloadTable(TableWidget):
         self.setRowCount(0)
         self.task_row_map.clear()
         tasks = db.get_all_tasks()
-        # print(tasks)
+        print(tasks)
+        t = [
+            {'id': 15, 'url': 'https://www.youtube.com/watch?v=g99GVTfyE_U', 'filename': 'Supernova# NEW FREE AI Coder is INSANE!.mp4', 'save_path': 'C:\\Users\\USER\\Downloads\\AIOTubeDown', 'category': 'Videos', 'size_total': 2817334, 'size_downloaded': 1024, 'status': 'Completed', 'speed': '500.2 KB/s', 'eta': '5s',
+                'date_added': '2026-05-03 20:11:25', 'date_completed': '2026-05-04 03:11:28', 'error_msg': None, 'segments': 1, 'priority': 'Normal', 'metadata_json': '{"path": "C:\\\\Users\\\\USER\\\\Downloads\\\\AIOTubeDown", "category": "Videos", "resolution": "720", "mp3": false, "thumbnail": false, "with_site": true, "with_username": true}'},
+            {'id': 14, 'url': 'https://www.youtube.com/watch?v=LXSxrLIxoaA', 'filename': 'AI TOOLS TIER LIST (2026).mp4', 'save_path': 'C:\\Users\\USER\\Downloads\\AIOTubeDown', 'category': 'Videos', 'size_total': 2670777, 'size_downloaded': 1024, 'status': 'Completed', 'speed': '250.0 KB/s', 'eta': '10s', 'date_added': '2026-05-03 20:03:41',
+             'date_completed': '2026-05-04 03:03:44', 'error_msg': None, 'segments': 1, 'priority': 'Normal', 'metadata_json': '{"path": "C:\\\\Users\\\\USER\\\\Downloads\\\\AIOTubeDown", "category": "Videos", "resolution": "720", "mp3": false, "thumbnail": false, "with_site": true, "with_username": true}'},
+            {'id': 13, 'url': 'https://www.youtube.com/watch?v=LXSxrLIxoaA', 'filename': 'AI TOOLS TIER LIST (2026).mp4', 'save_path': 'C:\\Users\\USER\\Downloads\\AIOTubeDown', 'category': 'Videos', 'size_total': 2670777, 'size_downloaded': 1024, 'status': 'Completed', 'speed': '275.8 KB/s', 'eta': '9s', 'date_added': '2026-05-03 20:03:20', 'date_completed': '2026-05-04 03:03:23', 'error_msg': None, 'segments': 1, 'priority': 'Normal', 'metadata_json': '{"path": "C:\\\\Users\\\\USER\\\\Downloads\\\\AIOTubeDown", "category": "Videos", "resolution": "720", "mp3": false, "thumbnail": false, "with_site": true, "with_username": true}'}]
         for task in tasks:
             self.add_task_to_table(task)
         self.setSortingEnabled(old_sorting)
@@ -251,6 +257,9 @@ class DownloadTable(TableWidget):
     def _find_row_by_task_id(self, task_id):
         for row in range(self.rowCount()):
             item = self.item(row, 0)
+            if item:
+                print(f'item.data(Qt.UserRole) = {item.data(Qt.UserRole)}')
+                print(f'task_id = {task_id}')
             if item and item.data(Qt.UserRole) == task_id:
                 return row
         return -1
@@ -267,6 +276,8 @@ class DownloadTable(TableWidget):
 
     @Slot(int, int, int, str, str)
     def update_progress(self, task_id, downloaded, total, speed, eta):
+        print(
+            f"Updating progress for task {task_id}: {downloaded}/{total} at {speed}")
         row = self._find_row_by_task_id(task_id)
         if row == -1:
             return

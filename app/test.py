@@ -9,11 +9,7 @@ from urllib.parse import quote, urlparse
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+from loguru import logger
 
 
 def test_youtube_extractor():
@@ -53,12 +49,25 @@ def test_drama_box_extractor():
 
     dramabox = DramaBoxExtractor()
     # asyncio.run(dramabox.test_get_drama_info())
+    # add headers bytes range for ts file
+    headers = {
+        "Range": "bytes=0-1000"
+    }
+    # resp = asyncio.run(dramabox.request(
+    #     'https://hwzthls.dramaboxdb.com/43/0x6/06x3/063x3/06330100014/570896434_2/m3u8/570896434.720p.m3u8?Expires=1777820400&Signature=fxA-4-UjRdJhleCL3pYcrzWJqvQM5H83w6UoVh3vL4ORnVacqwi-fzVt~oYpe5p0vEkt3srGi2kvS-w1q9OwC-kXnBPyFevfmEZ0f72l850Zwvy-PopRF-PoUznwuj5Pgk~zNLJ33nqv1-d3wJqLzVA5UaZnKFx-LEeLAAggs7idYNj5VewWU-LNsIiC~owlYbOWIcN3Kf8KSvYRATjC1Ye4iWVSCJik1j4olJuz5n5lH~24UHGL3miOWl1ubvsy6wiZMi81UY~jiYBBMw-c~sMUsvNXtfcB6yOd2spYyoRmFbZHaBB-ES0YUUUr1nV1BmYTMaEImjO3APWlueJCww__&Key-Pair-Id=K1C3ZON3Z3PP3P', headers=headers))
+    # if resp:
+    #     for key, value in resp.headers.items():
+    #         print(f"{key}: {value}")
+    #     print(resp.text[:1500])
 
-    dramabox.set_test_mode(True)
-    info = dramabox.load_test_data()
-    if info:
-        asyncio.run(dramabox.download_all_episodes(
-            info, with_site_name=True, is_test=True))
+    import math
+    print(math.ceil(85875/1000/7))
+
+    # dramabox.set_test_mode(True)
+    # info = dramabox.load_test_data()
+    # if info:
+    #     asyncio.run(dramabox.download_all_episodes(
+    #         info, with_site_name=True, is_test=True))
 
 
 def test_reelshort_extractor():
@@ -216,12 +225,12 @@ class ShortTvCrypto:
 
 
 if __name__ == "__main__":
-    logging.info("Testing Drama Extractor:")
+    logger.info("Testing Drama Extractor:")
     # test_youtube_extractor()
     # test_kuaishou_extractor()
     # test_drama_sansekai_extractor()
-    # test_drama_box_extractor()
-    test_reelshort_extractor()
+    test_drama_box_extractor()
+    # test_reelshort_extractor()
     # test_dramabite_extractor()
     # test_shortmovs_extractor()
     # test_rushtv_extractor()

@@ -3,6 +3,7 @@ import os
 import sqlite3
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from loguru import logger
@@ -74,9 +75,15 @@ class DownloadManager(QObject):
 
     @Slot(int, str)
     def on_worker_finished(self, task_id, filepath):
-        self.task_finished.emit(task_id, filepath)
-        db.update_task(task_id, status="Completed",
-                       date_completed=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        filepath = Path(filepath)
+        self.task_finished.emit(task_id, str(filepath))
+        db.update_task(
+            task_id,
+            filename=filepath.name,
+            save_path=str(filepath.parent),
+            status="Completed",
+            date_completed=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
         if task_id in self.active_workers:
             del self.active_workers[task_id]
 
@@ -89,11 +96,14 @@ class DownloadManager(QObject):
 
     @Slot(int, str)
     def on_worker_filename_updated(self, task_id, real_filename):
+        logger.debug(
+            f'on_worker_filename_updated {task_id} {real_filename}')
         self.task_filename_updated.emit(task_id, real_filename)
         db.update_task(task_id, filename=real_filename)
 
     def stop_task(self, task_id):
         if task_id in self.active_workers:
+            self.active_workers[task_id].is_cancelled = True
             self.active_workers[task_id].cancel()
             del self.active_workers[task_id]
             db.update_task(task_id, status="Stopped")

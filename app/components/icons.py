@@ -28,16 +28,24 @@ class FileIcon(FluentIconBase, Enum):
     RUSHSHORTSTV_LOGO = 'drama/rushshortstv-logo.png'
     STARDUSTTV_LOGO = 'drama/stardusttv-logo.png'
     FLICKREELS_LOGO = 'drama/flickreels-logo.png'
+    # icons
+    DOWNLOAD = 'icons/download.png'
+    SETTINGS = 'icons/settings.png'
+    VIDEO_DOWNLOAD = 'icons/video-download.png'
+    DOCUMENTS = 'icons/documents.png'
+    VIEW_FILE = 'icons/view-file.png'
+    VIDEO = 'icons/video.png'
+    VIDEO_FILE = 'icons/video-file.png'
 
     def path(self, theme=Theme.AUTO):
         type_icon = getIconColor(theme)
         type_icon = '-dark' if type_icon == 'white' else ''
         name, ext = os.path.splitext(self.value)
-        # file = f'./resource/images/{name}{type_icon}{ext}'
-        file = f':/assets/images/{name}{type_icon}{ext}'
+        file = f'./app/common/images/{name}{type_icon}{ext}'
+        # file = f':/assets/images/{name}{type_icon}{ext}'
         if type_icon == '-dark' and not QFile(file).exists():
-            # file = f'./resource/images/{self.value}'
-            file = f':/assets/images/{self.value}'
+            file = f'./app/common/images/{self.value}'
+            # file = f':/assets/images/{self.value}'
 
         return file
         # return f':/assets/images/{self.value}'
