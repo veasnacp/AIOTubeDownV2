@@ -1,9 +1,9 @@
 import asyncio
 import json
-from pathlib import Path
 import random
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -72,7 +72,6 @@ class KuaishouBaseIE:
             user_id = urlparse(url).path.replace('/', '')
 
         return user_id
-
 
     def datetime_timestamp(self, ts: int):
         return datetime.fromtimestamp(ts) if ts > 0 else "Unknown"
@@ -195,7 +194,15 @@ class KuaishouBaseIE:
             user_id = node.get("user_id") or ""
             video_details = client.get(
                 f"VisionVideoDetailPhoto:{video_id}", {})
-            user = client.get(f"VisionVideoDetailAuthor:{user_id}", {})
+            user = {}
+            if not user_id:
+                for _key, value in client.items():
+                    if _key.startswith("VisionVideoDetailAuthor:") and isinstance(value, dict):
+                        user = value
+                        user_id = user.get("id", "")
+                        break
+            else:
+                user = client.get(f"VisionVideoDetailAuthor:{user_id}", {})
         else:
             # Feed List Structure (Direct from GraphQL)
             video_details = node.get('photo', {})
@@ -277,7 +284,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         self.is_stopped = False
 
         self.proxies = proxies
-        self.session = AsyncSession(impersonate="chrome")
+        self.session = AsyncSession(impersonate="safari170")
         # self.base_headers = {
         #     "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         #     "accept-language": "en-US,en;q=0.9,km;q=0.8",
@@ -368,7 +375,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
     def callback_progress(self, video_info: dict):
         self.on_callback_progress(video_info)
 
-    def get_video_info(self, html: str, video_id: str, user_id: str|None=""):
+    def get_video_info(self, html: str, video_id: str, user_id: str | None = ""):
         """Internal handler to find JSON and run your extract_node_logic."""
         pattern = r'window\.__APOLLO_STATE__\s*=\s*(\{.*?\});'
         match = re.search(pattern, html)
@@ -445,6 +452,8 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         cookies = self.parse_cookie_string(cookie_input) if isinstance(
             cookie_input, str) else cookie_input
 
+        self.session.cookies.update(cookies)
+
         for attempt in range(retries):
             try:
                 proxy = self._get_proxy()
@@ -454,7 +463,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
                 resp = await self.session.get(
                     url,
                     headers=self.base_headers,
-                    cookies=cookies,
+                    # cookies=cookies,
                     proxy=proxy,
                     timeout=15
                 )
@@ -481,7 +490,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         return {"error": "All retry attempts failed."}
 
     async def extract_video_info_list(
-        self, url_list:list[str],
+        self, url_list: list[str],
         cookie_input: str | Dict[str, str] | None = None,
         retries: int = 3,
         backoff: float = 2.0
@@ -496,7 +505,8 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
             for url in url_list:
                 video_id, user_id = self.get_video_id_and_user_id(url)
                 tasks.append(
-                    self.get_initial_data(video_id, user_id, cookie_input, retries, backoff)
+                    self.get_initial_data(
+                        video_id, user_id, cookie_input, retries, backoff)
                 )
 
         task_list = await asyncio.gather(*tasks)
@@ -504,7 +514,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         for i, task in enumerate(task_list):
             if not isinstance(task, tuple):
                 task = task['error'] if isinstance(task, dict) and 'error' in task \
-                else "Unknown error during fetch."
+                    else "Unknown error during fetch."
                 self.callback_progress({"error": task})
                 continue
             try:
@@ -647,8 +657,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
 
 async def run_multitasking_scout():
     current_dir = Path(__file__).parent
-    raw_cookies = "kpf=PC_WEB; clientid=3; did=web_774a8dbd2165ce86470b7b2a06d0297b; kpn=KUAISHOU_VISION"
-    raw_cookies = "kwpsecproductname=kuaishou-vision; did=web_21854d512ae2e68512b9d6e13634359f; kwpsecproductname=kuaishou-vision; kwssectoken=oY4f3d/c3qphpTSPW1U8/zWn2m4ZbolCZdX+mBwaST9Osjps8cPhPA/0T5vi01+Rm2vHSxFLgtmBhJ0OXYqaUQ==; kwscode=c3836572dafa871fbc56056a2cce84cc02ad9e5b5724657af0330341a71eb139; ktrace-context=1|MS44Nzg0NzI0NTc4Nzk2ODY5Ljc5ODgyOTQ3LjE3NzUzOTY0ODI5MzguMzczNTg2Nzc=|MS44Nzg0NzI0NTc4Nzk2ODY5LjE5MjQ2NTUzLjE3NzUzOTY0ODI5MzguMzczNTg2Nzg=|0|webservice-user-growth-node|webservice|true|src-Js; kwfv1=PeDA80mSG00ZF8e400wnrU+fr78fLAwn+f+erh8nz0Pfbf+fbS8e8f+erEGA40+epf+nbS8emSP0cMGfb08Bbf8BPE+/4S8eZFPB+j80qhP0L98fbf80pD+0mSwBHF+emY8/WFP/rF+/rFPfHAP0HE+0mY+0LEPALFPADAGArM8eW=; kwssectoken=8UElhjrm66KFpaeVfGFr3CNNfOJo59T0chVPm6Q+Qw0t/nLEV9zPo4F5m3XhH541tsotUJGFWAqZimXnrkzFNQ==; kwscode=a715a587d1b6832f2760590584b05c42663b5eae5c68614a6b055f2e0f6069b7"
+    raw_cookies = "did=web_f2b26b6900fddfe8e3702468ab533a74"
     async with AsyncKuaishouExtractor() as scout:
         print("[*] Launching simultaneous scan...")
 
@@ -656,13 +665,13 @@ async def run_multitasking_scout():
             print("[Videos] Fetching details for a specific video...")
             result = await scout.extract_video_info_list(
                 [
-                    scout._LINK_VIDEO_WITH % "3xspaqvq478ugtw?user_id=3x36h86rp4kvnzs",
-                    scout._LINK_VIDEO_WITH % "3x8khtyuizknzqe?user_id=3xrt33qcrsbjfp2",
+                    # scout._LINK_VIDEO_WITH % "3xspaqvq478ugtw?user_id=3x36h86rp4kvnzs",
+                    scout._LINK_VIDEO_WITH % "3xc99qchtu8u9w2",
                 ],
                 cookie_input=raw_cookies,
                 retries=3
             )
-            with open(current_dir.joinpath("video_info.json"), "w") as f:
+            with open(current_dir.joinpath("_data", "__kuaishou_data.json"), "w") as f:
                 json.dump(result, f, indent=2)
 
         async def do_live_scan():
