@@ -7,11 +7,16 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from urllib.parse import urlparse
 
-from curl_cffi.requests import AsyncSession, RequestsError
+from curl_cffi.requests import AsyncSession, BrowserTypeLiteral, RequestsError, Response
+
+from ._request import ExtractorBase
+
+current_dir = Path(__file__).parent
 
 
-class KuaishouBaseIE:
-    _HOST_DOMAIN = "https://www.kuaishou.com/"
+class KuaishouBaseIE(ExtractorBase):
+    _BASE_URL = "https://www.kuaishou.com"
+    _CLOUD_FOLDER = "video/kuaishou"
     _API_QRAPHQL = "https://www.kuaishou.com/graphql"
 
     _LIVE_API_M_QRAPHQL = "https://live.kuaishou.com/m_graphql"
@@ -278,13 +283,12 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         "query": "fragment photoContent on PhotoEntity {\n  __typename\n  id\n  duration\n  caption\n  originCaption\n  likeCount\n  viewCount\n  commentCount\n  realLikeCount\n  coverUrl\n  photoUrl\n  photoH265Url\n  manifest\n  manifestH265\n  videoResource\n  coverUrls {\n    url\n    __typename\n  }\n  timestamp\n  expTag\n  animatedCoverUrl\n  distance\n  videoRatio\n  liked\n  stereoType\n  profileUserTopPhoto\n  musicBlocked\n  riskTagContent\n  riskTagUrl\n}\n\nfragment recoPhotoFragment on recoPhotoEntity {\n  __typename\n  id\n  duration\n  caption\n  originCaption\n  likeCount\n  viewCount\n  commentCount\n  realLikeCount\n  coverUrl\n  photoUrl\n  photoH265Url\n  manifest\n  manifestH265\n  videoResource\n  coverUrls {\n    url\n    __typename\n  }\n  timestamp\n  expTag\n  animatedCoverUrl\n  distance\n  videoRatio\n  liked\n  stereoType\n  profileUserTopPhoto\n  musicBlocked\n  riskTagContent\n  riskTagUrl\n}\n\nfragment feedContent on Feed {\n  type\n  author {\n    id\n    name\n    headerUrl\n    following\n    headerUrls {\n      url\n      __typename\n    }\n    __typename\n  }\n  photo {\n    ...photoContent\n    ...recoPhotoFragment\n    __typename\n  }\n  canAddComment\n  llsid\n  status\n  currentPcursor\n  tags {\n    type\n    name\n    __typename\n  }\n  __typename\n}\n\nquery visionProfilePhotoList($pcursor: String, $userId: String, $page: String, $webPageArea: String) {\n  visionProfilePhotoList(pcursor: $pcursor, userId: $userId, page: $page, webPageArea: $webPageArea) {\n    result\n    llsid\n    webPageArea\n    feeds {\n      ...feedContent\n      __typename\n    }\n    hostName\n    pcursor\n    __typename\n  }\n}\n"
     }
 
-    def __init__(self, proxies: Optional[List[str]] = None):
+    def __init__(self, proxies: Optional[List[str]] = None, impersonate: BrowserTypeLiteral = "chrome120", timeout: int = 30):
+        super().__init__(proxies, impersonate, timeout)
+
         self.concurrent_tasks = 10  # Limit concurrent tasks to avoid rate limiting
         self.delay_jitter = False  # Disable human-like delay by default
-        self.is_stopped = False
 
-        self.proxies = proxies
-        self.session = AsyncSession(impersonate="safari170")
         # self.base_headers = {
         #     "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         #     "accept-language": "en-US,en;q=0.9,km;q=0.8",
@@ -294,18 +298,18 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         #     "priority": "u=0, i",
         # }
         self.base_headers = {
-            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "accept-language": "en-US,en;q=0.9,km;q=0.8",
-            "cache-control": "no-cache",
-            "pragma": "no-cache",
-            "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "sec-fetch-dest": "document",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9,km;q=0.8",
+            # "Cache-Control": "no-cache",
+            # "Pragma": "no-cache",
+            # "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+            # "sec-ch-ua-mobile": "?0",
+            # "sec-ch-ua-platform": '"Windows"',
+            # "sec-fetch-dest": "document",
             "sec-fetch-mode": "navigate",
-            "sec-fetch-site": "none",
-            "sec-fetch-user": "?1",
-            "upgrade-insecure-requests": "1",
+            # "sec-fetch-site": "none",
+            # "sec-fetch-user": "?1",
+            # "upgrade-insecure-requests": "1",
         }
         self.base_profile_headers = {
             "accept": "*/*",
@@ -337,28 +341,8 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
             "upgrade-insecure-requests": "1",
         }
 
-    async def __aenter__(self): return self
-    async def __aexit__(self, *args): await self.session.close()
-
-    @staticmethod
-    def parse_cookie_string(cookie_str: str) -> Dict[str, str]:
-        """Converts a raw 'key1=val1; key2=val2' string into a Python dictionary."""
-        cookie_dict = {}
-        if not cookie_str:
-            return cookie_dict
-        for item in cookie_str.split(';'):
-            if '=' in item:
-                key, value = item.strip().split('=', 1)
-                cookie_dict[key] = value
-
-        print(f"[*] Parsed Cookies: {cookie_dict}")
-        return cookie_dict
-
     def _get_proxy(self):
-        if not self.proxies:
-            return None
-        p = random.choice(self.proxies)
-        return {"http": p, "https": p}
+        return self._get_random_proxy()
 
     async def login_stealth(self):
         """Pre-heats the session by visiting the home page to get base cookies."""
@@ -366,14 +350,11 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         await self.session.get("https://www.kuaishou.com/", headers=self.nav_headers, proxy=self._get_proxy())
         await asyncio.sleep(1)  # Wait for JS-like timing
 
-    def stop_extraction(self):
-        self.is_stopped = True
-
-    def on_callback_progress(self, video_info: dict):
+    def on_report_callback(self, video_info: dict):
         pass
 
-    def callback_progress(self, video_info: dict):
-        self.on_callback_progress(video_info)
+    def report_callback(self, video_info: dict):
+        self.on_report_callback(video_info)
 
     def get_video_info(self, html: str, video_id: str, user_id: str | None = ""):
         """Internal handler to find JSON and run your extract_node_logic."""
@@ -395,7 +376,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         Follows a short URL and returns the final destination and headers.
         Useful for converting v.kuaishou.com/xxxx links.
         """
-        cookie_dict = self.parse_cookie_string(cookies) if cookies else {}
+        cookie_dict = self.parse_cookies(cookies) if cookies else {}
 
         try:
             # We set allow_redirects=False to catch the first jump
@@ -446,45 +427,53 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
             await asyncio.sleep(random.uniform(1.5, 4.0))
 
         param_user_id = f"?user_id={user_id}" if user_id else ""
-        url = f"https://www.kuaishou.com/short-video/{video_id}{param_user_id}"
+        url = self._LINK_VIDEO_WITH % f"{video_id}{param_user_id}"
 
         # Normalize cookies
-        cookies = self.parse_cookie_string(cookie_input) if isinstance(
+        cookies = self.parse_cookies(cookie_input) if isinstance(
             cookie_input, str) else cookie_input
 
         self.session.cookies.update(cookies)
 
+        self.base_headers["Referer"] = url
+        if cookies:
+            self.base_headers["Cookie"] = "; ".join(
+                [f"{k}={v}" for k, v in cookies.items()])
+
         for attempt in range(retries):
             try:
-                proxy = self._get_proxy()
-                print(
+                self.logger.info(
                     f"[*] [Attempt {attempt+1}/{retries}] Fetching Kuaishou...")
 
-                resp = await self.session.get(
+                resp = await self.request(
                     url,
                     headers=self.base_headers,
-                    # cookies=cookies,
-                    proxy=proxy,
-                    timeout=15
+                    cookies=cookies,
+                    impersonate=self.impersonate,
+                    retries=0
                 )
+                if not resp or not isinstance(resp, Response):
+                    self.logger.error(f"[!] No response from {url}")
+                    continue
 
                 if resp.status_code == 200:
                     # Successful fetch, proceed to extraction
                     return (video_id, user_id, resp.text)
 
                 elif resp.status_code in [403, 429]:
-                    print(
+                    self.logger.error(
                         f"[!] Rate limited or Blocked (Status {resp.status_code}).")
                 else:
-                    print(f"[!] Server Error: {resp.status_code}")
+                    self.logger.error(f"[!] Server Error: {resp.status_code}")
 
             except (RequestsError, asyncio.TimeoutError) as e:
-                print(f"[!] Connection Error: {e}")
+                self.logger.error(f"[!] Connection Error: {e}")
 
             # If we reached here, the attempt failed. Wait before retrying.
             if attempt < retries - 1:
                 wait_time = backoff * (attempt + 1) + random.uniform(0.5, 1.5)
-                print(f"[*] Sleeping for {wait_time:.2f}s before retry...")
+                self.logger.debug(
+                    f"[*] Sleeping for {wait_time:.2f}s before retry...")
                 await asyncio.sleep(wait_time)
 
         return {"error": "All retry attempts failed."}
@@ -515,15 +504,15 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
             if not isinstance(task, tuple):
                 task = task['error'] if isinstance(task, dict) and 'error' in task \
                     else "Unknown error during fetch."
-                self.callback_progress({"error": task})
+                self.report_callback({"error": task})
                 continue
             try:
                 video_id, user_id, html = task
                 video_info = self.get_video_info(html, video_id, user_id)
-                self.callback_progress(video_info)
+                self.report_callback(video_info)
                 video_info_list.append(video_info)
             except Exception as err:
-                self.callback_progress({"error": str(err)})
+                self.report_callback({"error": str(err)})
                 continue
 
         return video_info_list
@@ -557,7 +546,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
             "Referer": f"https://live.kuaishou.com/profile/{user_id}",
         }
 
-        cookies = self.parse_cookie_string(cookie_input)
+        cookies = self.parse_cookies(cookie_input)
 
         # --- STEP 1: Resolve User Info ---
         # info_url = "https://live.kuaishou.com/live_api/baseuser/userinfo/byid"
@@ -623,8 +612,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
 
                     if resp.status_code == 200:
                         data = resp.json().get("data", {})
-                        with open("live_api_response.json", "w", encoding="utf-8") as f:
-                            json.dump(data, f, ensure_ascii=False, indent=4)
+                        self.save_test_data(data, suffix="_public_profile")
                         list_data = data.get("list", [])
 
                         for item in list_data:
@@ -654,35 +642,47 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
 
             await asyncio.sleep(random.uniform(1.0, 2.5))
 
+    async def get_live_profile_videos(
+        self,
+        url_uid: str,
+        limit: int = None,
+        sort_by="newest",
+    ):
+        await asyncio.sleep(0.00005)
+
 
 async def run_multitasking_scout():
-    current_dir = Path(__file__).parent
-    raw_cookies = "did=web_f2b26b6900fddfe8e3702468ab533a74"
+    raw_cookies = "did=web_db214ac2bfa3481494d80da73924f80c"
     async with AsyncKuaishouExtractor() as scout:
         print("[*] Launching simultaneous scan...")
+        scout.set_test_mode(True)
 
         async def do_videos():
             print("[Videos] Fetching details for a specific video...")
             result = await scout.extract_video_info_list(
                 [
-                    # scout._LINK_VIDEO_WITH % "3xspaqvq478ugtw?user_id=3x36h86rp4kvnzs",
-                    scout._LINK_VIDEO_WITH % "3xc99qchtu8u9w2",
+                    scout._LINK_VIDEO_WITH % "3xspaqvq478ugtw?user_id=3x36h86rp4kvnzs",
+                    scout._LINK_VIDEO_WITH % "3x25by2mwk82ute",
                 ],
                 cookie_input=raw_cookies,
                 retries=3
             )
-            with open(current_dir.joinpath("_data", "__kuaishou_data.json"), "w") as f:
-                json.dump(result, f, indent=2)
+            scout.logger.info(f"[Videos] Fetched {len(result)} videos.")
+            scout.save_test_data(result)
 
         async def do_live_scan():
             print("[Live] Starting live profile scan...")
-            raw_cookies = "did=web_774a8dbd2165ce86470b7b2a06d0297b"
-
             live_results = []
             async for video in scout.get_public_profile_videos("HBDXMA369", raw_cookies, limit=4):
                 live_results.append(video)
-            with open(current_dir.joinpath("live_scan.json"), "w") as f:
-                json.dump(live_results, f, indent=2)
+
+            scout.save_test_data(live_results, suffix="_profile")
+
+        async def do_live_profile_videos_scan():
+            print("[Live] Starting live profile scan...")
+
+            url_uid = 'https://www.kuaishou.com/profile/3xee4ritq5k6t2k'
+            result = await scout.get_live_profile_videos(url_uid, )
 
         await asyncio.gather(do_videos())
 

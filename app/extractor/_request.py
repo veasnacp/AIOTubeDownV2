@@ -103,6 +103,9 @@ class AsyncBaseRequest:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    async def close(self):
         try:
             self.session_sync.close()
         except:

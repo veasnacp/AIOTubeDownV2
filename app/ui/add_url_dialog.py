@@ -71,6 +71,13 @@ class AddUrlDialog(MessageBoxBase):
         self.options_layout.addWidget(self.cb_user_folder)
         self.options_layout.addWidget(self.cb_thumbnail)
 
+        self.cb_site_folder.setChecked(True)
+        self.cb_user_folder.setChecked(True)
+        self.cb_site_folder.checkStateChanged.connect(
+            lambda: self._update_download_folder())
+        self.cb_user_folder.checkStateChanged.connect(
+            lambda: self._update_download_folder())
+
         # Options Row 2
         self.cb_mp3 = CheckBox("Download with MP3", self)
         self.options_layout.addWidget(self.cb_mp3)
@@ -78,8 +85,8 @@ class AddUrlDialog(MessageBoxBase):
         # Path Selection
         self.path_layout = QHBoxLayout()
         self.path_edit = LineEdit(self)
-        self.default_path = DIRS.user_downloads_path.joinpath(APP_NAME)
-        self.path_edit.setText(str(self.default_path))
+        self.downloads_path = DIRS.user_downloads_path.joinpath(APP_NAME)
+        self._update_download_folder()
         self.browse_btn = PushButton(FluentIcon.FOLDER, "Select Folder", self)
         self.browse_btn.clicked.connect(self._browse_folder)
         self.path_layout.addWidget(self.path_edit)
@@ -153,6 +160,12 @@ class AddUrlDialog(MessageBoxBase):
             self, "Select Download Folder", self.path_edit.text())
         if folder:
             self.path_edit.setText(folder)
+
+    def _update_download_folder(self):
+        site_name = "%SITE%" if self.cb_site_folder.isChecked() else ""
+        user_name = "%USERNAME%" if self.cb_user_folder.isChecked() else ""
+        self.path_edit.setText(
+            str(self.downloads_path.joinpath(site_name, user_name)))
 
     def get_urls(self):
         text = self.url_edit.toPlainText().strip()

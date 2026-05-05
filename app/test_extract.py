@@ -13,7 +13,7 @@ from loguru import logger
 
 
 def test_youtube_extractor():
-    from extractor.youtube_ import YouTubeExtractor
+    from .extractor.youtube import YouTubeExtractor
 
     youtube = YouTubeExtractor()
     youtube.set_test_mode(True)
@@ -26,13 +26,13 @@ def test_youtube_extractor():
 
 
 def test_kuaishou_extractor():
-    from extractor.kuaishou import run_multitasking_scout
+    from .extractor.kuaishou import run_multitasking_scout
 
     asyncio.run(run_multitasking_scout())
 
 
 def test_drama_sansekai_extractor():
-    from extractor.test import DramaSansekaiExtractor
+    from .extractor.test import DramaSansekaiExtractor
 
     dramasansekai = DramaSansekaiExtractor()
     asyncio.run(dramasansekai.test_get_drama_info())
@@ -45,7 +45,7 @@ def test_drama_sansekai_extractor():
 
 
 def test_drama_box_extractor():
-    from extractor.drama import DramaBoxExtractor
+    from .extractor.drama import DramaBoxExtractor
 
     dramabox = DramaBoxExtractor()
     # asyncio.run(dramabox.test_get_drama_info())
@@ -58,7 +58,7 @@ def test_drama_box_extractor():
 
 
 def test_reelshort_extractor():
-    from extractor.drama import ReelShortExtractor
+    from .extractor.drama import ReelShortExtractor
 
     dramareel = ReelShortExtractor()
     # asyncio.run(dramareel.test_get_drama_info())
@@ -71,7 +71,7 @@ def test_reelshort_extractor():
 
 
 def test_dramabite_extractor():
-    from extractor.drama import DramaBiteExtractor
+    from .extractor.drama import DramaBiteExtractor
 
     dramabite = DramaBiteExtractor()
     # asyncio.run(dramabite.test_get_drama_info())
@@ -83,7 +83,7 @@ def test_dramabite_extractor():
 
 
 def test_shortmovs_extractor():
-    from extractor.drama import ShortMovsExtractor
+    from .extractor.drama import ShortMovsExtractor
 
     shortmovs = ShortMovsExtractor()
     # asyncio.run(shortmovs.test_get_drama_info())
@@ -97,7 +97,7 @@ def test_shortmovs_extractor():
 
 
 def test_rushtv_extractor():
-    from extractor.drama import RushTvExtractor
+    from .extractor.drama import RushTvExtractor
 
     rushtv = RushTvExtractor()
     # asyncio.run(rushtv.test_get_drama_info())
@@ -109,7 +109,7 @@ def test_rushtv_extractor():
 
 
 def test_stardusttv_extractor():
-    from extractor.drama import StardustTvExtractor
+    from .extractor.drama import StardustTvExtractor
 
     stardust = StardustTvExtractor()
     asyncio.run(stardust.test_get_drama_info())
@@ -211,7 +211,7 @@ class ShortTvCrypto:
 # encrypted = crypto.encrypt_request_params({"id": 123})
 
 
-if __name__ == "__main__":
+def test_all():
     logger.info("Testing Drama Extractor:")
     # test_youtube_extractor()
     test_kuaishou_extractor()

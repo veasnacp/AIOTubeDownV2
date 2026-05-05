@@ -15,6 +15,7 @@ from PySide6Addons import (
     SettingCardGroup,
     SwitchSettingCard,
     Theme,
+    TitleLabel,
     qconfig,
     setTheme,
     setThemeColor,
@@ -28,7 +29,11 @@ from PySide6Addons.components.widgets.button import PushButton
 from PySide6Addons.components.widgets.label import CaptionLabel
 
 from ..components.override import CardWidget
+from ..config.constants import DIRS
 from ..theme import Colors, LightMode
+
+qconfig.file = DIRS.user_data_path / "settings.json"
+qconfig.save = lambda: None
 
 
 class ColorSettingCard(SettingCard):
@@ -67,20 +72,23 @@ class SettingsPage(ScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("settings")
-        self.setWidgetResizable(True)
-        self.setViewportMargins(16, 16, 16, 16)
-        # self.setStyleSheet("""
-        #     QScrollArea {
-        #         border: none;
-        #     }
-        # """)
 
-        self.contentWidget = CardWidget()
-        self.setWidget(self.contentWidget)
+        # Sticky Title Label
+        self.settingLabel = TitleLabel("Settings", self)
+        self.settingLabel.setObjectName("settingLabel")
+
+        self.contentWidget = QWidget()
+        self.contentWidget.setObjectName("contentWidget")
         self.expand_layout = ExpandLayout(self.contentWidget)
 
         self.initUI()
+
+        self.setWidget(self.contentWidget)
+        self.setViewportMargins(0, 80, 0, 20)
+        self.settingLabel.move(36, 30)
+
         self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.enableTransparentBackground()
 
     def initUI(self):
@@ -109,16 +117,6 @@ class SettingsPage(ScrollArea):
             QColor(LightMode.primary), "Accent Color", "Change the application accent color", self.contentWidget)
         appearanceGroup.addSettingCard(self.accentColorCard)
 
-        # Window Title Bar
-        self.titleBarSwitch = SwitchSettingCard(
-            FIF.BRUSH, "Window Title Bar", "Use Windows 11 title bar style", parent=self.contentWidget)
-        appearanceGroup.addSettingCard(self.titleBarSwitch)
-
-        # Language
-        self.language = PushSettingCard(
-            "Change", FIF.BRUSH, "Language", "Choose your preferred language", self.contentWidget)
-        appearanceGroup.addSettingCard(self.language)
-
         # About Group
         aboutGroup = SettingCardGroup(
             "About", self.contentWidget)
@@ -144,9 +142,9 @@ class SettingsPage(ScrollArea):
             "Manage", FIF.CERTIFICATE, "License", "Manage your license", self.contentWidget)
         aboutGroup.addSettingCard(self.licenseCard)
 
-        self.setWidget(self.contentWidget)
-        self.setWidgetResizable(True)
-        self.enableTransparentBackground()
+        # add setting card group to layout
+        self.expand_layout.setSpacing(28)
+        self.expand_layout.setContentsMargins(36, 10, 36, 0)
 
         # Set initial value
         current_theme = self.window().property("theme")
@@ -161,8 +159,6 @@ class SettingsPage(ScrollArea):
         # Connect signals
         self.themeCard.optionChanged.connect(self.onThemeChanged)
         self.accentColorCard.colorChanged.connect(setThemeColor)
-        self.titleBarSwitch.checkedChanged.connect(self.onTitleBarChanged)
-        self.language.clicked.connect(self.onLanguageClicked)
         self.feedbackCard.clicked.connect(self.onFeedbackClicked)
         self.updateCard.clicked.connect(self.onUpdateClicked)
         self.licenseCard.clicked.connect(self.onLicenseClicked)
