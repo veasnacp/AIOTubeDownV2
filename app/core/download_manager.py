@@ -46,7 +46,8 @@ class DownloadManager(QObject):
         worker.signals.progress.connect(self.on_worker_progress)
         worker.signals.status_changed.connect(self.on_worker_status)
         worker.signals.finished.connect(self.on_worker_finished)
-        worker.signals.error.connect(self.on_worker_error)
+        worker.signals.error.connect(
+            lambda task_id, error_msg: self.on_worker_error(task_id, error_msg, url))
         worker.signals.filename_updated.connect(
             self.on_worker_filename_updated)
 
@@ -88,9 +89,9 @@ class DownloadManager(QObject):
             del self.active_workers[task_id]
 
     @Slot(int, str)
-    def on_worker_error(self, task_id, error_msg):
+    def on_worker_error(self, task_id, error_msg, url):
         self.task_error.emit(task_id, error_msg)
-        db.update_task(task_id, status="Error", error_msg=error_msg)
+        db.update_task(task_id, url=url, status="Error", error_msg=error_msg)
         if task_id in self.active_workers:
             del self.active_workers[task_id]
 

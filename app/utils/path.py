@@ -1,19 +1,14 @@
 import os
-from pathlib import Path
-from typing import Literal, Optional, TypeAlias, Union
+import subprocess
+import sys
+import time
+import urllib.parse
+import winreg
 
-# Type Aliases
-EnvSortName: TypeAlias = Literal[
-    "$AppData", "$Roaming", "$Roaming", "$LocalAppData", "$Temp", "$Home", "$User"
-]
-HomeSortName: TypeAlias = Literal[
-    "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"
-]
-PathLike: TypeAlias = Optional[Union[str, Path]]
-ExpandBehavior: TypeAlias = Literal["~", "$", None]
+import win32com.client
 
 
-def split_filepath(filepath: PathLike):
+def split_filepath(filepath: str):
     """
     Splits a filepath into its root, basename, filename, and extension.
 
@@ -29,109 +24,128 @@ def split_filepath(filepath: PathLike):
     return root, basename, filename, ext
 
 
-class PathHandler:
-    """Handles file paths, environment variable and user directory expansion."""
+def focus_window(compare_path, select_file_path=None):
+    window_found = False
+    shell = win32com.client.Dispatch("Shell.Application")
+    for window in shell.Windows():
+        # Check if the window is an Explorer window and matches our path
+        # Note: We use .lower() and normalization to ensure paths match
+        try:
+            window_path = os.path.abspath(
+                window.LocationURL.replace("file:///", "").replace("/", "\\"))
+            # LocationURL uses URL encoding (e.g., %20 for spaces)
+            window_path = urllib.parse.unquote(window_path)
 
-    _ENV_VARS = {  # Dictionary of common environment variables
-        "AppData": "APPDATA",  # Windows
-        "Roaming": "APPDATA",  # Often used with AppData on Windows
-        "LocalAppData": "LOCALAPPDATA",  # Windows
-        "Temp": "TEMP",
-        "Home": "HOME",  # Linux/macOS
-        "User": "USERPROFILE"  # Windows
-    }
+            if window_path.lower() == compare_path.lower():
+                # We found the window! Now focus it and select the file
+                window.Visible = True
 
-    def __init__(self, path: Union[PathLike, EnvSortName] = None, expand: ExpandBehavior = None):
-        self._original_path: PathLike = path or "~"
-        self._expanded_path: Optional[Path] = None
-        self._expand_behavior = expand
-        env_var = self._ENV_VARS.get(str(self._original_path)[1:])
-        if env_var:
-            self._expand_behavior = "$"
-        self._expand_path()
+                # Bring to front (Visual focus)
+                shell_gui = win32com.client.Dispatch("WScript.Shell")
+                shell_gui.AppActivate(window.LocationName)
 
-    def _expand_path(self):
-        path_str = str(self._original_path)
+                if select_file_path:
+                    # Select the specific file inside the folder
+                    folder_view = window.Document
+                    folder_view.SelectItem(select_file_path, 1 | 4 | 8 | 16)
+                    # Flags: 1=Select, 4=Focus, 8=Scroll into view, 16=Deselect others
 
-        if self._expand_behavior == "~":
-            path_str = os.path.expanduser(path_str)
-        elif self._expand_behavior == "$":
-            # Expand environment variables, handling our special cases
-            other = ''
-            if "/" in path_str or '\\' in path_str:
-                path_part = path_str.replace('\\', '/').split('/', 1)
-                path_str = path_part[0]
-                other = '/' + path_part[1]
-            env_var = self._ENV_VARS.get(path_str[1:])
-            if env_var is not None:
-                path_str = path_str.replace(
-                    path_str, os.environ.get(env_var, ""))
-            # else:
-                # for short_name, env_var in self._ENV_VARS.items():
-                #     path_str = path_str.replace(
-                #         f"${short_name}", os.environ.get(env_var, ""))
-            path_str = path_str + other
-            path_str = os.path.expandvars(path_str)  # Handle other env vars
-        elif self._expand_behavior is None:
-            pass  # No expansion
-        else:
-            raise ValueError(
-                f"Invalid expand behavior: {self._expand_behavior}")
+                window_found = True
+                break
+        except Exception:
+            continue
 
-        self._expanded_path = Path(path_str).resolve()  # Resolve to full path
-
-    @property
-    def path(self) -> Path:
-        if self._expanded_path is None:
-            raise ValueError("Path expansion failed.")
-        return self._expanded_path
-
-    @property
-    def original_path(self) -> PathLike:
-        return self._original_path
-
-    def __str__(self) -> str:
-        return str(self.path)
-
-    def __repr__(self) -> str:
-        return f"PathHandler(path='{self._original_path}', expand='{self._expand_behavior}')"
-
-    def join(self, path: Union[PathLike, HomeSortName], *other_paths: PathLike) -> Path:
-        return self.path.joinpath(path, *other_paths)
+    return window_found
 
 
-# # Example Usage:
-# appdata_path = PathHandler("$AppData/MyApp", expand="$")
-# print(f"AppData Path: {appdata_path}")  # Output: Full path to AppData/MyApp
+def reveal_in_explorer(file_path: str):
+    file_path = os.path.abspath(file_path)
+    folder_path = os.path.dirname(file_path)
+    file_name = os.path.basename(file_path)
 
-# # Often the same as AppData
-# roaming_path = PathHandler("$Roaming/MyApp", expand="$")
-# print(f"Roaming Path: {roaming_path}")
+    window_found = focus_window(folder_path, file_path)
+    if not window_found:
+        os.startfile(folder_path)
+        for i in range(3):
+            time.sleep(0.15)
+            window_found = focus_window(folder_path, file_path)
+            if window_found:
+                break
 
-# temp_path = PathHandler("$Temp", expand="$").join('myfile.txt')
-# print(f"Temp Path: {temp_path}")
 
-# local_path = PathHandler("$LocalAppData", expand="$").join('MyApp')
-# print(f"Local AppData Path: {local_path}")
+def reveal_in_finder(file_path: str):
+    # This script tells Finder to activate (come to front),
+    # open the file's container, and select the file.
+    script = f'''
+    set theFile to POSIX file "{file_path}"
+    tell application "Finder"
+        activate
+        reveal theFile
+    end tell
+    '''
+    subprocess.Popen(['osascript', '-e', script])
 
-# home_path = PathHandler("~", expand="~")
-# print(f"Home path: {home_path}")
+    # subprocess.Popen(['open', '-R', str(path)])
 
-# relative_path = home_path.join("documents", "report.pdf")
-# print(f"Relative path (resolved): {relative_path}")
 
-# home_path = PathHandler("$Home", expand="$")
-# print(f"Home path $: {home_path}")
+def reveal_in_linux(file_path):
+    # Most modern Linux file managers (Nautilus, Dolphin, Nemo)
+    # support the 'ShowItems' DBus interface.
+    uri = f"file://{file_path}"
+    try:
+        subprocess.Popen([
+            'dbus-send', '--print-reply', '--dest=org.freedesktop.FileManager1',
+            '/org/freedesktop/FileManager1', 'org.freedesktop.FileManager1.ShowItems',
+            f'array:string:{uri}', 'string:""'
+        ])
+    except Exception:
+        # Fallback: Just open the parent folder if DBus fails
+        parent_folder = os.path.dirname(file_path)
+        subprocess.Popen(['xdg-open', parent_folder])
 
-# Demonstrates Path.resolve()
-# import sys
-# executable = sys.executable
-# unresolved_path = PathHandler("./AIOTubeDown.exe", expand=None).path.as_posix()
-# print(f"Unresolved Path: {unresolved_path}", Path(executable).as_posix())
 
-# resolved_path = PathHandler("./some/path", expand=None).path.resolve()
-# print(f"Resolved Path: {resolved_path}")
+def reveal_file(file_path: str):
+    if sys.platform == "win32":
+        reveal_in_explorer(file_path)
+    elif sys.platform == "darwin":
+        reveal_in_finder(file_path)
+    else:
+        reveal_in_linux(file_path)
 
-# # Example of using a custom environment variable (you'd need to set this)
-# custom_path = PathHandler("$MY_CUSTOM_DIR/data.txt", expand="$")
-# print(f"Custom Path: {custom_path}")
+
+def get_open_with_apps(file_path: str):
+    """Returns a list of (app_name, app_path) for the given file's extension."""
+    ext = os.path.splitext(file_path)[1].lower()
+    apps = []
+
+    try:
+        # Path to the 'OpenWithList' for this extension
+        reg_path = rf"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{ext}\OpenWithList"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path) as key:
+            i = 0
+            while True:
+                try:
+                    # Values are usually named 'a', 'b', 'c'...
+                    value_name, app_exe, _ = winreg.EnumValue(key, i)
+                    if app_exe.endswith(".exe"):
+                        apps.append(app_exe)
+                    i += 1
+                except OSError:
+                    break
+    except OSError:
+        pass
+
+    return list(set(apps))
+
+
+def trigger_windows_open_with(file_path):
+    """Launch the file with a specific app."""
+    subprocess.Popen(
+        f'rundll32.exe shell32.dll,OpenAs_RunDLL {file_path}', shell=True)
+
+
+if __name__ == "__main__":
+    path = r"C:\Users\USER\Downloads\AIOTubeDown\YouTube\danmartell\AI TOOLS TIER LIST (2026).mp4"
+    exe_list = get_open_with_apps(path)
+    print(exe_list)
+    trigger_windows_open_with(path)

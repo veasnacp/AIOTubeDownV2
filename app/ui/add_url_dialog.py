@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from PySide6Addons import (
@@ -159,6 +161,7 @@ class AddUrlDialog(MessageBoxBase):
         folder = QFileDialog.getExistingDirectory(
             self, "Select Download Folder", self.path_edit.text())
         if folder:
+            self.downloads_path = Path(folder)
             self.path_edit.setText(folder)
 
     def _update_download_folder(self):
@@ -188,7 +191,7 @@ class AddUrlDialog(MessageBoxBase):
         res_map = {0: "360", 1: "480", 2: "720",
                    3: "1080", 4: "1440", 5: "2160"}
         return {
-            "path": self.path_edit.text(),
+            "path": str(self.downloads_path),
             "category": self.cat_combo.currentText(),
             "resolution": res_map.get(self.res_combo.currentIndex(), "720"),
             "mp3": self.cb_mp3.isChecked(),

@@ -331,13 +331,13 @@ class DownloaderPage(ScrollArea):
                 url = info.get('url')
                 filename = info.get('title')
                 options = extract_manager.options
-                manager.add_task(
+                new_task_id = manager.add_task(
                     url, filename, options['path'],
                     category=options['category'], info=info,
                     options=options
                 )
                 task_data = {
-                    'id': task_id, 'url': url, 'filename': filename,
+                    'id': new_task_id, 'url': url, 'filename': filename,
                     'save_path': options['path'], 'category': options['category'],
                     'status': 'Downloading', 'size_total': 0, 'size_downloaded': 0
                 }
@@ -404,11 +404,11 @@ class DownloaderPage(ScrollArea):
 
         if task:
             task = dict(task)
-            self.filename_label.setText(task.get('filename', 'Unknown'))
+            filename = task.get('filename') or task.get('url') or 'Unknown'
+            self.filename_label.setText(filename)
 
             # Update detail labels
-            ext = os.path.splitext(task.get('filename', ''))[
-                1].upper().replace('.', '')
+            ext = os.path.splitext(filename)[1].upper().replace('.', '')
             self.detail_items["Type"].setText(f"{ext} File" if ext else "File")
 
             size = task.get('size_total', 0)

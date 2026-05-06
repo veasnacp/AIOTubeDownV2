@@ -219,7 +219,7 @@ class YouTubeBaseIE(ExtractorBase):
         visitor_data = None
         streaming_data = None
         html = str(html).replace("\\/", "/")
-        if "var ytInitialData =" in html:
+        if "var ytInitialData =" in html and "currentVideoEndpoint" in html:
             matches = re.search(
                 r'(var\sytInitialData\s=\s)(.*?)(;<\/script>)', html)
             ytInitialData = [c for c in matches.groups(
@@ -272,7 +272,7 @@ class YouTubeBaseIE(ExtractorBase):
                     'webResponseContextExtensionData', {}).get('ytConfigData', {}).get('visitorData')
                 # print(f"Extracted visitorData: {visitor_data}")
             except Exception as err:
-                print("Error ytInitialData", err)
+                self.logger.debug(f"Error ytInitialData: {err}")
                 # continue
 
         if "var ytInitialPlayerResponse =" in html and "streamingData" in html:
@@ -286,8 +286,7 @@ class YouTubeBaseIE(ExtractorBase):
             ytInitialPlayerResponse = [
                 "{" + c for c in matches.groups() if 'playerMicroformatRenderer' in c][0] if matches else None
             if ytInitialPlayerResponse:
-                current_dir = Path(__file__).parent
-                with open(current_dir.joinpath("mobile_ytInitialPlayerResponse.txt"), "w", encoding="utf-8") as f:
+                with open(current_dir.joinpath("_data", "__mobile_ytInitialPlayerResponse.txt"), "w", encoding="utf-8") as f:
                     f.write(ytInitialPlayerResponse)
 
             # ytInitialPlayerResponse = self.get_json_from_html(html, "ytInitialPlayerResponse", 6, '"}}}};').strip() + '"}}}}'
@@ -847,6 +846,8 @@ class YouTubeExtractor(YouTubeBaseIE):
                 if self.cancel:
                     self.on_extracting({"status": "cancelled"})
                     break
+                with open(current_dir.joinpath("_data", "__youtube_mobile_html.txt"), "w", encoding="utf-8") as f:
+                    f.write(html)
                 # def fetch_js(js_url):
                 #     try:
                 #         resp = self.request_sync(js_url)

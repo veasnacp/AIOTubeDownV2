@@ -331,7 +331,7 @@ class DownloadWorker(QRunnable):
                     self.signals.status_changed.emit(self.task_id, "Completed")
         except Exception as e:
             if not self._is_cancelled:
-                logger.error(f"yt-dlp failed: {e}")
+                logger.error(f"Download failed: {e}")
                 self.signals.error.emit(self.task_id, str(e))
 
     def yt_dl_hook_wrapper(self, d):
