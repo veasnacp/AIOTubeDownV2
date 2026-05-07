@@ -183,9 +183,8 @@ class ExtractManager(QObject):
             del self.active_workers[task_id]
 
     def stop_all_extraction(self):
-        for task_id in self.active_workers:
-            self.active_workers[task_id].cancel()
-            del self.active_workers[task_id]
+        for task_id in list(self.active_workers.keys()):
+            self.stop_extraction(task_id)
 
 
 extract_manager = ExtractManager()

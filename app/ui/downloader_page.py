@@ -1,6 +1,6 @@
 import os
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 import humanize
 from loguru import logger
@@ -27,12 +27,12 @@ from ..components.icons import FileIcon
 from ..components.override import CardWidget
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
+from ..core.thumbnail_manager import thumbnail_manager
 from ..db.database import db
 from ..theme import Colors, DarkMode, LightMode
 from .action_panel import ActionPanel
 from .add_url_dialog import AddUrlDialog
 from .download_table import DownloadTable
-from ..core.thumbnail_manager import thumbnail_manager
 
 
 class DownloaderPage(ScrollArea):
@@ -234,8 +234,13 @@ class DownloaderPage(ScrollArea):
         if self.widget():
             self.widget().setStyleSheet(f"QWidget{{background: {bg}}}")
 
-    def add_url_test(self):
+    def add_url_test(self, text: str = None):
         dialog = AddUrlDialog(self.window())
+        if text:
+            dialog.url_edit.setPlainText(text)
+            # Trigger stats update
+            dialog._update_stats()
+
         if dialog.exec():
             urls, invalid_urls = dialog.get_urls()
             if len(urls) == 0:
@@ -436,14 +441,11 @@ class DownloaderPage(ScrollArea):
             self.properties_btn.show()
 
             # Set icon based on extension if possible
-            video_path = Path(save_path) / filename
+            media_path = Path(save_path or '.') / filename
             has_thumbnail = False
-            if video_path.exists():
-                icon = thumbnail_manager.get_thumbnail_as_icon(str(video_path))
-                if icon:
-                    self.thumbnail_icon.setIcon(icon)
-                    self.thumbnail_icon.setIconSize(QSize(160, 160))
-                    has_thumbnail = True
+            if media_path.exists() and ext in ["MP4", "MKV", "AVI", "MOV", "WMV"]:
+                thumbnail_manager.generate_thumbnails(str(media_path))
+                has_thumbnail = True
 
             if not has_thumbnail:
                 self.thumbnail_icon.setIcon(FileIcon.VIDEO_FILE if ext in [
@@ -452,19 +454,18 @@ class DownloaderPage(ScrollArea):
 
             self.file_icon_small.setIcon(self.thumbnail_icon.icon())
 
-            if video_path.exists() and ext in ["MP4", "MKV", "AVI", "MOV", "WMV"]:
-                thumbnail_manager.add_task(str(video_path))
-
-    def on_thumbnail_extracted(self, task_id: str, pixmap: QPixmap, video_path: str, file_hash: str):
+    def on_thumbnail_extracted(
+        self,
+        file_hash: str,
+        video_path: str,
+        pixmap: QPixmap
+    ):
         # Only update if the thumbnail belongs to the currently selected file
         selected_rows = self.download_table.selectionModel().selectedRows()
         if len(selected_rows) == 1:
             row = selected_rows[0].row()
             item = self.download_table.item(row, 0)
             if item:
-                db_task_id = item.data(Qt.UserRole)
-                # Check if the thumbnail path matches the current selection's expected path
-                # Or if the task_id (hash) matches
                 if pixmap and not pixmap.isNull():
                     icon = QIcon()
                     icon.addPixmap(pixmap, QIcon.Mode.Normal, QIcon.State.Off)

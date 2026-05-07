@@ -200,7 +200,6 @@ class DownloadTable(TableWidget):
         self.setSortingEnabled(False)
         self.setRowCount(0)
         tasks = db.get_all_tasks()
-        print(tasks)
         for task in tasks:
             self.add_task_to_table(task)
         self.setSortingEnabled(old_sorting)

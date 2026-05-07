@@ -4,10 +4,11 @@ from pathlib import Path
 
 import darkdetect
 import loguru
-from PySide6.QtCore import QFile, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QFile, QIODevice, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QStackedWidget,
@@ -37,6 +38,7 @@ from ..common import resource_rc
 from ..components import FileIcon
 from ..components.override import CardWidget, NavigationBar, RoundMenu
 from ..config.constants import APP_VERSION_BETA
+from ..config.settings import settings
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
 from ..core.license_manager import license_manager
@@ -199,21 +201,32 @@ class MainWindow(MSFluentWindow):
         self.tasks_btn.setFixedWidth(60)
         self.tasks_btn.setCheckable(True)
 
-        tasks_menu = RoundMenu(parent=self)
-        tasks_menu.addAction(
-            Action(self.tr("New Text File"), shortcut="Ctrl+N"))
-        tasks_menu.addAction(Action(self.tr("Add new download"),
-                                    triggered=self.downloader_page.add_url_test))
-        tasks_menu.addAction(
-            Action(self.tr("Add new download from clipboard")))
+        self.tasks_menu = RoundMenu(parent=self)
+
+        # New Text File action
+        self.new_file_action = Action(self.tr(
+            "New Text File"), shortcut="Ctrl+N", triggered=self._import_urls_from_file)
+        self.tasks_menu.addAction(self.new_file_action)
+
+        # Add new download action
+        self.tasks_menu.addAction(Action(self.tr("Add new download"),
+                                         triggered=lambda: self.downloader_page.add_url_test()))
+
+        # Add new download from clipboard action
+        self.clipboard_action = Action(self.tr("Add new download from clipboard"),
+                                       triggered=self._add_new_download_from_clipboard)
+        self.tasks_menu.addAction(self.clipboard_action)
 
         # Open Recent Submenu
-        open_recent_menu = RoundMenu(self.tr("Open Recent"), parent=tasks_menu)
-        open_recent_menu.addAction(Action(self.tr("Clear Recently Opened")))
-        tasks_menu.addMenu(open_recent_menu)
+        self.open_recent_menu = RoundMenu(
+            self.tr("Open Recent"), parent=self.tasks_menu)
+        self.tasks_menu.addMenu(self.open_recent_menu)
 
-        tasks_menu.addSeparator()
-        tasks_menu.addAction(
+        # Update clipboard action state based on recent files
+        self._update_recent_menu()
+
+        self.tasks_menu.addSeparator()
+        self.tasks_menu.addAction(
             Action(self.tr("Exit"), shortcut="Ctrl+F4", triggered=self.close))
 
         # Create "Help" button and menu
@@ -227,13 +240,13 @@ class MainWindow(MSFluentWindow):
 
         self.tasks_btn.onPress = lambda event: self.help_btn.setChecked(False)
         self.help_btn.onPress = lambda event: self.tasks_btn.setChecked(False)
-        tasks_menu.onClose = lambda: self.tasks_btn.setChecked(False)
+        self.tasks_menu.onClose = lambda: self.tasks_btn.setChecked(False)
         help_menu.onClose = lambda: self.help_btn.setChecked(False)
-        self.tasks_btn.clicked.connect(lambda: tasks_menu.exec(
-            self.tasks_btn.mapToGlobal(self.tasks_btn.rect().bottomLeft())
-        ))
         self.help_btn.clicked.connect(lambda: help_menu.exec(
             self.help_btn.mapToGlobal(self.help_btn.rect().bottomLeft())
+        ))
+        self.tasks_btn.clicked.connect(lambda: self.tasks_menu.exec(
+            self.tasks_btn.mapToGlobal(self.tasks_btn.rect().bottomLeft())
         ))
 
         self.titleBarHLayout.removeWidget(self.titleBar.titleLabel)
@@ -287,13 +300,91 @@ class MainWindow(MSFluentWindow):
             if interface:
                 self.stackedWidget.setCurrentWidget(interface)
 
+    def _import_urls_from_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, self.tr("Open Text File"), "", self.tr(
+                "Text Files (*.txt);;All Files (*)")
+        )
+        if file_path:
+            file = QFile(file_path)
+            if file.open(QIODevice.ReadOnly | QIODevice.Text):
+                text = str(file.readAll(), encoding='utf-8')
+                self.downloader_page.add_url_test(text)
+                self._add_to_recent(file_path)
+                file.close()
+
+    def _add_new_download_from_clipboard(self):
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+        if text:
+            self.downloader_page.add_url_test(text)
+
+    def _add_to_recent(self, file_path):
+        recent = settings.get("recent_files", [])
+        if not isinstance(recent, list):
+            recent = []
+        if file_path in recent:
+            recent.remove(file_path)
+        recent.insert(0, file_path)
+        recent = recent[:10]
+        settings.set("recent_files", recent)
+        self._update_recent_menu()
+
+    def _clear_recent(self):
+        settings.set("recent_files", [])
+        self._update_recent_menu()
+
+    def _update_recent_menu(self):
+        # RoundMenu.clear() and removeAction() may not remove separators correctly.
+        # We must clear the underlying view directly to ensure a clean slate.
+        self.open_recent_menu.clear()
+        if hasattr(self.open_recent_menu, 'view'):
+            self.open_recent_menu.view.clear()
+        recent = settings.get("recent_files", [])
+        if not isinstance(recent, list):
+            recent = []
+
+        # Add recent files
+        for file_path in recent:
+            action = Action(os.path.basename(file_path),
+                            parent=self.open_recent_menu)
+            action.triggered.connect(
+                lambda checked=False, p=file_path: self._open_recent_file(p))
+            self.open_recent_menu.addAction(action)
+
+        # Only add separator if there are recent files to separate from the Clear action
+        if recent:
+            self.open_recent_menu.addSeparator()
+
+        # Always show Clear action, but disable if no recent files
+        clear_action = Action(
+            self.tr("Clear Recently Opened"), triggered=self._clear_recent)
+        clear_action.setEnabled(len(recent) > 0)
+        self.open_recent_menu.addAction(clear_action)
+
+        # Ensure the menu itself is enabled to show the Clear action
+        self.open_recent_menu.setEnabled(True)
+
+        # As per requirement: disable clipboard action if recent list is empty
+        # if hasattr(self, 'clipboard_action'):
+        #     self.clipboard_action.setEnabled(len(recent) > 0)
+
+    def _open_recent_file(self, file_path):
+        file = QFile(file_path)
+        if file.open(QIODevice.ReadOnly | QIODevice.Text):
+            text = str(file.readAll(), encoding='utf-8')
+            self.downloader_page.add_url_test(text)
+            file.close()
+            # Move to top
+            self._add_to_recent(file_path)
+
     def closeEvent(self, event):
-        logger.info("Application closing, stopping all managers...")
+        logger.debug("Application closing, stopping all managers...")
         try:
             manager.stop_all()
             extract_manager.stop_all_extraction()
             thumbnail_manager.stop_all()
         except Exception as e:
-            logger.error(f"Error during shutdown cleanup: {e}")
+            logger.debug(f"Error during shutdown cleanup: {e}")
         event.accept()
         QApplication.quit()

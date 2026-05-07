@@ -104,7 +104,6 @@ class DownloadManager(QObject):
 
     def stop_task(self, task_id):
         if task_id in self.active_workers:
-            self.active_workers[task_id].is_cancelled = True
             self.active_workers[task_id].cancel()
             del self.active_workers[task_id]
             db.update_task(task_id, status="Stopped")

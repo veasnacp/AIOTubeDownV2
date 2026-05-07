@@ -1,6 +1,8 @@
 import hashlib
-from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool, QUrl, Qt, QEventLoop, Slot
-from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
+import shutil
+import subprocess
+
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 from PySide6.QtGui import QIcon, QPixmap
 
 from ..config.constants import DIRS
@@ -8,124 +10,137 @@ from ..config.constants import DIRS
 CACHE_DIR = DIRS.user_cache_path
 
 
-class ThumbSignals(QObject):
-    result = Signal(QPixmap, str, str)
+def hash_path(file_path: str):
+    return hashlib.md5(file_path.encode()).hexdigest()
+
+
+class ThumbnailCache:
+
+    @staticmethod
+    def get_thumb_path(media_path: str, file_hash=None):
+        if not file_hash:
+            file_hash = hash_path(media_path)
+        return CACHE_DIR / f"{file_hash}.png"
+
+    @staticmethod
+    def generate_thumbnail(media_path: str, file_hash=None):
+        thumb_path = ThumbnailCache.get_thumb_path(media_path, file_hash)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
+        if not thumb_path.exists():
+            subprocess.run([
+                ffmpeg_exe,
+                "-y",
+                "-i", media_path,
+                "-ss", "00:00:01",
+                "-vframes", "1",
+                "-vf", "scale=320:-1",
+                str(thumb_path)
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        return QPixmap(str(thumb_path))
+
+
+class ThumbnailSignals(QObject):
+    finished = Signal(str, str, QPixmap)
+    error = Signal(str, str, str)
 
 
 class ThumbnailWorker(QRunnable):
-    def __init__(self, video_path: str, file_hash: str):
+
+    def __init__(self, media_path: str, file_hash: str):
         super().__init__()
-        self.video_path = video_path
+        self.media_path = media_path
         self.file_hash = file_hash
-        self.signals = ThumbSignals()
-        self._is_cancelled = False
-        self._loop = None
+        self.signals = ThumbnailSignals()
 
     def run(self):
-        # 1. Generate Cache Key
-        cache_path = CACHE_DIR / f"{self.file_hash}.png"
+        thumbnail = ThumbnailCache.generate_thumbnail(
+            self.media_path, self.file_hash)
 
-        # 2. Check Disk Cache first
-        if cache_path.exists():
-            pix = QPixmap(str(cache_path))
-            self.signals.result.emit(pix, self.video_path, self.file_hash)
-            return
+        # Try attached picture first (instant if exists)
+        # args = [
+        #     "-v", "error",
+        #     "-i", self.media_path,
+        #     "-map", "0:v",
+        #     "-c", "copy",
+        #     "-f", "image2",
+        #     "pipe:1"
+        # ]
+        # subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # 3. Extract natively if not cached
-        player = QMediaPlayer()
-        sink = QVideoSink()
-        player.setVideoSink(sink)
+        self.signals.finished.emit(self.file_hash, self.media_path, thumbnail)
 
-        self._loop = QEventLoop()
+    def _extract_keyframe(self, timestamp):
 
-        def on_frame(frame: QPixmap):
-            img = frame.toImage().scaled(
-                200, 200,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            img.save(str(cache_path))  # Save to disk cache
-            self.signals.result.emit(QPixmap.fromImage(
-                img), self.video_path, self.file_hash)
-            if self._loop:
-                self._loop.quit()
-
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        sink.videoFrameChanged.connect(on_frame)
-        player.setSource(QUrl.fromLocalFile(self.video_path))
-        player.setPosition(1000)  # Jump 1s in
-        player.pause()
-
-        if not self._is_cancelled:
-            self._loop.exec()
-
-        player.stop()
-
-    def cancel(self):
-        self._is_cancelled = True
-        if self._loop:
-            self._loop.quit()
+        self.args = [
+            "-v", "error",
+            "-ss", timestamp,   # fast seek before input
+            "-i", self.media_path,
+            "-frames:v", "1",
+            "-an", "-sn", "-dn",
+            "-vf", "scale=320:-1",    # scale immediately for speed
+            "-f", "image2",
+            "pipe:1"
+        ]
+        return self.args
 
 
 class ThumbnailManager(QObject):
-    # Signals to update the UI
-    task_status = Signal(str, str)  # task_id, status
-    # task_id, pixmap, video_path, file_hash
-    task_finished = Signal(str, QPixmap, str, str)
-    task_error = Signal(str, str)  # task_id, error_msg
-    task_filename_updated = Signal(str, str)  # task_id, real_filename
+    # Signals
+    task_finished = Signal(str, str, QPixmap)
+    task_error = Signal(str, str, str)
 
     def __init__(self):
         super().__init__()
-        self.thread_pool = QThreadPool()
-        self.thread_pool.setMaxThreadCount(3)
-        self.active_workers = {}  # task_id -> DownloadWorker
+        self.pool = QThreadPool.globalInstance()
+        self.pool.setMaxThreadCount(6)  # sweet spot
+        self.active_workers = {}
 
-    def add_task(self, video_path: str):
-        file_hash = hashlib.md5(video_path.encode()).hexdigest()
-        task_id = file_hash
+    def generate_thumbnails(self, media_path: str):
+        file_hash = hash_path(media_path)
+        worker = ThumbnailWorker(media_path, file_hash)
+        worker.signals.finished.connect(self.on_finished)
+        worker.signals.error.connect(self.on_error)
+        self.active_workers[file_hash] = worker
+        self.pool.start(worker)
 
-        worker = ThumbnailWorker(video_path, file_hash)
+    def on_finished(self, file_hash, media_path, thumbnail):
+        if file_hash in self.active_workers:
+            del self.active_workers[file_hash]
+        self.task_finished.emit(file_hash, media_path, thumbnail)
 
-        worker.signals.result.connect(lambda pixmap, video_path, file_hash: self.on_worker_result(
-            task_id, pixmap, video_path, file_hash))
-
-        self.active_workers[task_id] = worker
-        self.thread_pool.start(worker)
-
-        return task_id
+    def on_error(self, file_hash, media_path, error_msg):
+        if file_hash in self.active_workers:
+            del self.active_workers[file_hash]
+        self.task_error.emit(file_hash, media_path, error_msg)
 
     def remove_task(self, task_id: str):
         if task_id in self.active_workers:
             self.active_workers[task_id].cancel()
             del self.active_workers[task_id]
 
-    def stop_all(self):
-        for task_id in list(self.active_workers.keys()):
-            self.remove_task(task_id)
-        self.thread_pool.waitForDone(1000)
-
-    def cache_path(self, video_path: str):
-        file_hash = hashlib.md5(video_path.encode()).hexdigest()
+    def cache_path(self, media_path: str):
+        file_hash = hash_path(media_path)
         cache_path = CACHE_DIR / f"{file_hash}.png"
         return cache_path
 
-    def get_thumbnail(self, video_path: str):
-        cache_path = self.cache_path(video_path)
+    def get_thumbnail(self, media_path: str):
+        cache_path = self.cache_path(media_path)
         if cache_path.exists():
             return QPixmap(str(cache_path))
         return None
 
-    def get_thumbnail_as_icon(self, video_path: str):
-        pixmap = self.get_thumbnail(video_path)
+    def get_thumbnail_as_icon(self, media_path: str):
+        pixmap = self.get_thumbnail(media_path)
         if pixmap:
             icon = QIcon()
             icon.addPixmap(pixmap, QIcon.Mode.Normal, QIcon.State.Off)
             return icon
         return None
 
-    def remove_cache(self, video_path: str):
-        cache_path = self.cache_path(video_path)
+    def remove_cache(self, media_path: str):
+        cache_path = self.cache_path(media_path)
         if cache_path.exists():
             cache_path.unlink()
 
@@ -134,12 +149,13 @@ class ThumbnailManager(QObject):
             if file.is_file() and file.suffix == ".png":
                 file.unlink()
 
-    @Slot(QPixmap, str, str)
-    def on_worker_result(self, task_id: str, pixmap: QPixmap, video_path: str, file_hash: str):
-        self.task_finished.emit(task_id, pixmap, video_path, file_hash)
-
-        if task_id in self.active_workers:
-            del self.active_workers[task_id]
+    def stop_all(self):
+        try:
+            for task_id in list(self.active_workers.keys()):
+                self.remove_task(task_id)
+            self.pool.waitForDone(100)
+        except Exception as e:
+            print(f"Error stopping thumbnail manager: {e}")
 
 
 thumbnail_manager = ThumbnailManager()
