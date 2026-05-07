@@ -40,6 +40,7 @@ from ..config.constants import APP_VERSION_BETA
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
 from ..core.license_manager import license_manager
+from ..core.thumbnail_manager import thumbnail_manager
 from ..theme import Colors, DarkMode, LightMode
 from .downloader_page import DownloaderPage
 from .drama_downloader_page import DramaDownloaderPage
@@ -285,3 +286,14 @@ class MainWindow(MSFluentWindow):
             interface = self.findChild(QWidget, route)
             if interface:
                 self.stackedWidget.setCurrentWidget(interface)
+
+    def closeEvent(self, event):
+        logger.info("Application closing, stopping all managers...")
+        try:
+            manager.stop_all()
+            extract_manager.stop_all_extraction()
+            thumbnail_manager.stop_all()
+        except Exception as e:
+            logger.error(f"Error during shutdown cleanup: {e}")
+        event.accept()
+        QApplication.quit()

@@ -50,7 +50,7 @@ class DownloadTable(TableWidget):
         self.setShowGrid(False)
 
         self.setBorderRadius(8)
-        # self.setBorderVisible(True)
+        self.setBorderVisible(True)
         self.setWordWrap(False)
 
         self.load_tasks()

@@ -1,10 +1,11 @@
 import os
+from pathlib import Path
 import sqlite3
 
 import humanize
 from loguru import logger
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QResizeEvent
+from PySide6.QtGui import QColor, QIcon, QPixmap, QResizeEvent
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from PySide6Addons import (
     BodyLabel,
@@ -31,6 +32,7 @@ from ..theme import Colors, DarkMode, LightMode
 from .action_panel import ActionPanel
 from .add_url_dialog import AddUrlDialog
 from .download_table import DownloadTable
+from ..core.thumbnail_manager import thumbnail_manager
 
 
 class DownloaderPage(ScrollArea):
@@ -199,6 +201,9 @@ class DownloaderPage(ScrollArea):
 
         extract_manager.task_finished.connect(self.on_extract_success)
         extract_manager.task_error.connect(self.on_extract_error)
+
+        thumbnail_manager.task_finished.connect(
+            self.on_thumbnail_extracted)
 
         # Connect Action Panel Signals
         self.action_panel.add_url_clicked.connect(self.add_url_test)
@@ -376,6 +381,7 @@ class DownloaderPage(ScrollArea):
             # self.share_btn.hide()
             self.properties_btn.hide()
             self.thumbnail_icon.setIcon(FileIcon.VIEW_FILE)
+            self.thumbnail_icon.setIconSize(QSize(80, 80))
         elif count == 1:
             self.action_panel.stop_btn.setDisabled(False)
             self.action_panel.del_btn.setDisabled(False)
@@ -394,6 +400,7 @@ class DownloaderPage(ScrollArea):
             # self.share_btn.show()  # Maybe show bulk actions
             self.properties_btn.hide()
             self.thumbnail_icon.setIcon(FileIcon.DOCUMENTS)
+            self.thumbnail_icon.setIconSize(QSize(80, 80))
 
     def update_file_detail(self, task_id):
         conn = db.get_connection()
@@ -429,9 +436,42 @@ class DownloaderPage(ScrollArea):
             self.properties_btn.show()
 
             # Set icon based on extension if possible
-            self.thumbnail_icon.setIcon(FileIcon.VIDEO_FILE if ext in [
-                                        'MP4', 'MKV', 'AVI'] else FluentIcon.MUSIC if ext == 'MP3' else FileIcon.VIEW_FILE)
+            video_path = Path(save_path) / filename
+            has_thumbnail = False
+            if video_path.exists():
+                icon = thumbnail_manager.get_thumbnail_as_icon(str(video_path))
+                if icon:
+                    self.thumbnail_icon.setIcon(icon)
+                    self.thumbnail_icon.setIconSize(QSize(160, 160))
+                    has_thumbnail = True
+
+            if not has_thumbnail:
+                self.thumbnail_icon.setIcon(FileIcon.VIDEO_FILE if ext in [
+                                            'MP4', 'MKV', 'AVI'] else FluentIcon.MUSIC if ext == 'MP3' else FileIcon.VIEW_FILE)
+                self.thumbnail_icon.setIconSize(QSize(80, 80))
+
             self.file_icon_small.setIcon(self.thumbnail_icon.icon())
+
+            if video_path.exists() and ext in ["MP4", "MKV", "AVI", "MOV", "WMV"]:
+                thumbnail_manager.add_task(str(video_path))
+
+    def on_thumbnail_extracted(self, task_id: str, pixmap: QPixmap, video_path: str, file_hash: str):
+        # Only update if the thumbnail belongs to the currently selected file
+        selected_rows = self.download_table.selectionModel().selectedRows()
+        if len(selected_rows) == 1:
+            row = selected_rows[0].row()
+            item = self.download_table.item(row, 0)
+            if item:
+                db_task_id = item.data(Qt.UserRole)
+                # Check if the thumbnail path matches the current selection's expected path
+                # Or if the task_id (hash) matches
+                if pixmap and not pixmap.isNull():
+                    icon = QIcon()
+                    icon.addPixmap(pixmap, QIcon.Mode.Normal, QIcon.State.Off)
+                    self.thumbnail_icon.setIcon(icon)
+                    self.thumbnail_icon.setIconSize(QSize(160, 160))
+                    self.file_icon_small.setIcon(FileIcon.VIDEO_FILE)
+                    self.update()
 
     def on_extract_error(self, task_id, d):
         error_msg = d.get("error")

@@ -1,0 +1,14 @@
+aiofiles
+cloudinary
+curl-cffi
+darkdetect
+dill
+humanize
+loguru
+platformdirs
+pycryptodome
+pyside6==6.10.2
+pytubefix
+pywin32
+tqdm
+yt-dlp
