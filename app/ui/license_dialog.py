@@ -4,14 +4,16 @@ import hashlib
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication
 from PySide6Addons import (MessageBoxBase, SubtitleLabel, LineEdit, PushButton,
-                             PrimaryPushButton, FluentIcon, InfoBar, CaptionLabel,
-                             TransparentToolButton, BodyLabel)
+                           PrimaryPushButton, FluentIcon, InfoBar, CaptionLabel,
+                           BodyLabel)
 
 from ..core.license_manager import license_manager
+from ..components.override import TransparentToolButton
 
 
 class LicenseDialog(MessageBoxBase):
     """Custom Dialog for License Activation"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -28,7 +30,8 @@ class LicenseDialog(MessageBoxBase):
         self.title_layout.addWidget(self.close_btn)
 
         # Hardware ID section
-        self.hw_label = CaptionLabel("Your Hardware ID (Unique to this PC):", self)
+        self.hw_label = CaptionLabel(
+            "Your Hardware ID (Unique to this PC):", self)
         self.hw_id_edit = LineEdit(self)
         self.hw_id_edit.setText(license_manager.hw_id)
         self.hw_id_edit.setReadOnly(True)
@@ -79,7 +82,8 @@ class LicenseDialog(MessageBoxBase):
         # Main Layout
         self.viewLayout.addLayout(self.title_layout)
         self.viewLayout.addSpacing(10)
-        self.viewLayout.addWidget(QLabel("Please activate your license to continue using Download Manager."))
+        self.viewLayout.addWidget(
+            QLabel("Please activate your license to continue using Download Manager."))
         self.viewLayout.addSpacing(15)
         self.viewLayout.addWidget(self.hw_label)
         self.viewLayout.addLayout(self.hw_row)
@@ -95,12 +99,14 @@ class LicenseDialog(MessageBoxBase):
 
     def _copy_hw_id(self):
         QApplication.clipboard().setText(license_manager.hw_id)
-        InfoBar.success("Copied", "Hardware ID copied to clipboard", duration=1500, parent=self)
+        InfoBar.success("Copied", "Hardware ID copied to clipboard",
+                        duration=1500, parent=self)
 
     def _on_activate_clicked(self):
         key = self.key_edit.text().strip()
         if not key:
-            InfoBar.warning("Required", "Please enter a license key", parent=self)
+            InfoBar.warning(
+                "Required", "Please enter a license key", parent=self)
             return
 
         if license_manager.activate(key):
@@ -153,4 +159,4 @@ class LicenseDialog(MessageBoxBase):
         # if not license_manager.is_activated():
         #     QApplication.quit()
         # else:
-            event.accept()
+        event.accept()

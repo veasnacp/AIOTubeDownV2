@@ -1,35 +1,24 @@
 import os
 import sys
-from pathlib import Path
 
 import darkdetect
 import loguru
-from PySide6.QtCore import QFile, QIODevice, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QFile, QIODevice, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QStackedWidget,
-    QVBoxLayout,
     QWidget,
 )
 from PySide6Addons import (
     Action,
     FluentIcon,
-    FluentWindow,
     MSFluentTitleBar,
     MSFluentWindow,
     NavigationItemPosition,
-    TabWidget,
     Theme,
-    ToolButton,
     TransparentPushButton,
-    TransparentToolButton,
     getFont,
-    isDarkTheme,
-    setFont,
     setTheme,
     setThemeColor,
 )

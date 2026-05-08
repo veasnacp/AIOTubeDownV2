@@ -6,7 +6,7 @@ import humanize
 from loguru import logger
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QIcon, QPixmap, QResizeEvent
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QToolButton, QVBoxLayout, QWidget
 from PySide6Addons import (
     BodyLabel,
     CaptionLabel,
@@ -18,13 +18,12 @@ from PySide6Addons import (
     SegmentedWidget,
     SimpleCardWidget,
     SubtitleLabel,
-    TransparentToolButton,
     isDarkTheme,
     qconfig,
 )
 
 from ..components.icons import FileIcon
-from ..components.override import CardWidget
+from ..components.override import CardWidget, TransparentToolButton
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
 from ..core.thumbnail_manager import thumbnail_manager

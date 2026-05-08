@@ -22,12 +22,22 @@ from PySide6Addons import (
     isDarkTheme,
     setFont,
     themeColor,
+    TransparentDropDownToolButton as FluentTransparentDropDownToolButton,
+    TransparentToolButton as FluentTransparentToolButton,
 )
 from PySide6Addons.common.color import autoFallbackThemeColor
 from PySide6Addons.components.widgets.combo_box import ComboBoxMenu
 from PySide6Addons.components.widgets.menu import LineEditMenu, TextEditMenu
 
 from ..theme import Colors, DarkMode, LightMode
+
+
+class TransparentDropDownToolButton(FluentTransparentDropDownToolButton):
+    ...
+
+
+class TransparentToolButton(FluentTransparentToolButton):
+    ...
 
 
 class ToolTip(QFTooltip):

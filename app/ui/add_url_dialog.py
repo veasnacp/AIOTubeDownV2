@@ -10,13 +10,14 @@ from PySide6Addons import (
     PushButton,
     StrongBodyLabel,
     SubtitleLabel,
-    TransparentToolButton,
 )
 
-from ..components.override import CardWidget, MessageBoxBase, NumberInput
-from ..components.override import SelectComboBox as ComboBox
-from ..components.override import TextAreaInput as TextEdit
-from ..components.override import TextInput as LineEdit
+from ..components.override import (
+    CardWidget, MessageBoxBase, NumberInput, TransparentToolButton,
+    SelectComboBox as ComboBox,
+    TextAreaInput as TextEdit,
+    TextInput as LineEdit
+)
 from ..config.constants import APP_NAME, DIRS
 from ..theme import Colors
 from ..utils.validation import is_valid_url

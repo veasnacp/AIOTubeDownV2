@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
 )
-from PySide6Addons import FluentIcon, ProgressBar, TableWidget, TransparentToolButton
+from PySide6Addons import FluentIcon, ProgressBar, TableWidget
 
 from ..components.override import RoundMenu
 from ..db.database import db

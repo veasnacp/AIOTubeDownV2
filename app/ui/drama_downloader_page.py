@@ -21,15 +21,10 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPixmap
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
-    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -40,9 +35,6 @@ from PySide6Addons import (
     CaptionLabel,
     FlowLayout,
     FluentIcon,
-    InfoBadge,
-    InfoBar,
-    InfoBarPosition,
     LineEdit,
     MenuIndicatorType,
     PrimaryPushButton,
@@ -54,15 +46,11 @@ from PySide6Addons import (
     TabBar,
     TabCloseButtonDisplayMode,
     TogglePushButton,
-    TransparentDropDownToolButton,
-    TransparentToolButton,
-    isDarkTheme,
-    qrouter,
     setFont,
 )
 
 from ..components.icons import FileIcon
-from ..components.override import CardWidget, CheckableMenu
+from ..components.override import CardWidget, CheckableMenu, TransparentDropDownToolButton, TransparentToolButton
 from ..components.override import TextAreaInput as TextEdit
 from ..components.override import TextInput as LineEdit
 from ..core._worker import DefaultWorker
@@ -1119,7 +1107,10 @@ class DramaDownloaderPage(ScrollArea):
         self.add_tab_button.setChecked(False)
         self.add_tab_button.setMenu(self.createCheckableMenu())
         self.add_tab_button.setFixedHeight(34)
-        setFont(self.add_tab_button, 12)
+        font = self.font()
+        font.setPointSize(12)
+        self.add_tab_button.setFont(font)
+        # setFont(self.add_tab_button, 12)
         self.tabBar.widgetLayout.insertWidget(
             1, self.add_tab_button, stretch=0, alignment=Qt.AlignLeft)
 
