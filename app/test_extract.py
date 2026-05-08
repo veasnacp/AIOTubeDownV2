@@ -25,6 +25,19 @@ def test_youtube_extractor():
             info_list, with_site_name=True, with_channel_name=True, is_test=True))
 
 
+def test_tiktok_extractor():
+    from .extractor.tiktok import TikTokExtractor
+
+    tiktok = TikTokExtractor()
+    tiktok.set_test_mode(True)
+    asyncio.run(tiktok.test_get_video_info_list())
+
+    # info_list = tiktok.load_test_data()
+    # if info_list:
+    #     asyncio.run(tiktok.download_all_videos(
+    #         info_list, with_site_name=True, with_channel_name=True, is_test=True))
+
+
 def test_kuaishou_extractor():
     from .extractor.kuaishou import run_multitasking_scout
 
@@ -212,9 +225,10 @@ class ShortTvCrypto:
 
 
 def test_all():
-    logger.info("Testing Drama Extractor:")
+    logger.info("Testing Extractor:")
     # test_youtube_extractor()
-    test_kuaishou_extractor()
+    test_tiktok_extractor()
+    # test_kuaishou_extractor()
     # test_drama_sansekai_extractor()
     # test_drama_box_extractor()
     # test_reelshort_extractor()

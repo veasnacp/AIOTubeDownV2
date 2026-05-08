@@ -1,6 +1,7 @@
 import asyncio
 import json
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Union
@@ -41,6 +42,24 @@ def get_json_from_html(html: str, key: str, num_chars: int = 2, stop: str = '"')
     pos_begin = html.find(key) + len(key) + num_chars
     pos_end = html.find(stop, pos_begin)
     return html[pos_begin:pos_end]
+
+
+def get_content_from_html_selector(
+    content: str,
+    tag_name: Optional[str] = None,
+    selectors: Optional[List[str]] = None,
+) -> List[str]:
+    tag_name = tag_name or "div"
+    selector = ""
+    if isinstance(selectors, list):
+        selector = ".*?" + ".*?".join(selectors) + ".*?"
+    html_pattern = "(?:<%s%s>)(.*?)(?:</%s>)" % (
+        tag_name,
+        selector,
+        tag_name
+    )
+
+    return re.findall(html_pattern, content)
 
 
 def dict_to_query_string(dict_obj: dict):
@@ -96,6 +115,7 @@ class AsyncBaseRequest:
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
         }
+        self.cancel = False
         self.logger_name = logger_name
         self.logger = logger.bind(name=self.logger_name)
 
@@ -157,6 +177,8 @@ class AsyncBaseRequest:
             current_cookies = None
 
         for attempt in range(retries + 1):
+            if hasattr(self, "cancel") and self.cancel:
+                break
             try:
                 proxy = self._get_random_proxy()
 
@@ -268,7 +290,6 @@ class ExtractorBase(AsyncBaseRequest):
         timeout: int = 30
     ):
         super().__init__(proxies, impersonate, timeout)
-        self.cancel = False
         self.cancel_download = False
         self.active_downloader = None
 
@@ -322,19 +343,19 @@ class ExtractorBase(AsyncBaseRequest):
                 f"[!] ❌ Failed to load data from Cloudinary or local file: {e}")
             return None
 
-    def save_error_text(self, text: str, ext: str = "txt"):
+    def save_error_text(self, text: str, ext: str = "txt", suffix: str = "_error"):
         try:
             if self._IS_TESTING:
                 folder = current_dir / '_data'
                 folder.mkdir(exist_ok=True)
-                with open(folder / f"__{self._CLOUD_FOLDER.split('/')[-1]}_error.{ext}", "w", encoding="utf-8", errors="strict") as out_f:
+                with open(folder / f"__{self._CLOUD_FOLDER.split('/')[-1]}{suffix}.{ext}", "w", encoding="utf-8", errors="strict") as out_f:
                     out_f.write(text)
         except Exception as e:
             self.logger.error(
                 f"[!] ❌ Failed to save error text to Cloudinary or local file: {e}")
 
-    def save_html_text(self, text: str):
-        self.save_error_text(text, ext="html")
+    def save_html_text(self, text: str, suffix: str = ""):
+        self.save_error_text(text, ext="html", suffix=suffix)
 
     async def get_drama_info_from_cloudinary(self, video_id: str):
         try:

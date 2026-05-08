@@ -10,5 +10,5 @@ def test_db():
 
 
 if __name__ == "__main__":
-    # test_all()
-    test_db()
+    test_all()
+    # test_db()

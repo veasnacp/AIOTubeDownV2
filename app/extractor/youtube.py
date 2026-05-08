@@ -416,11 +416,12 @@ class YouTubeBaseIE(ExtractorBase):
                 height = f.get('height', 0)
                 resolution_compare = height if width >= height else width
                 if f.get('ext') == 'mp4' and resolution_compare <= self.resolution:
-                    print('resolution', resolution_compare)
+                    self.logger.debug(f'resolution {resolution_compare}')
                     video_url = f['url']
                     video_info = f
                     break
         except Exception as err:
+            self.logger.debug(f'Error getting selected video info: {err}')
             video_info = info.get('both', [])[0]
         return video_info
 
@@ -846,8 +847,7 @@ class YouTubeExtractor(YouTubeBaseIE):
                 if self.cancel:
                     self.on_extracting({"status": "cancelled"})
                     break
-                with open(current_dir.joinpath("_data", "__youtube_mobile_html.txt"), "w", encoding="utf-8") as f:
-                    f.write(html)
+                self.save_html_text(html, "_m")
                 # def fetch_js(js_url):
                 #     try:
                 #         resp = self.request_sync(js_url)
@@ -914,54 +914,3 @@ class YouTubeExtractor(YouTubeBaseIE):
                 info["selected_info"] = selected_info
             self.save_test_data(info_list)
         return info_list
-
-
-# async def run_multitasking_scout():
-#     async with YouTubeExtractor() as scout:
-#         print("[*] Launching simultaneous scan...")
-
-#         # Task 1: Search for specific IT topics
-#         async def do_search():
-#             print("[Search] Scanning for 'Next.js 15'...")
-#             async for vid in scout.get_search("Next.js 15", limit=1):
-#                 scout.set_test_mode(True)
-#                 scout.save_test_data(vid, "search")
-#                 print(
-#                     f"  [Search Hit] {vid.get('videoId')} by {vid.get('user_info', {}).get('name')}")
-
-#         # Task 2: Check a logistics-related channel
-#         async def do_channel():
-#             print("[Channel] Checking newest videos...")
-#             # Using your major as a keyword example
-#             async for vid in scout.get_channel_videos("https://www.youtube.com/@Fireship", limit=1):
-#                 print(
-#                     f"  [Channel Hit] {vid.get('videoId')} by {vid.get('user_info', {}).get('name')}")
-#                 scout.set_test_mode(True)
-#                 scout.save_test_data(vid, "channel")
-
-#         async def do_videos():
-#             print("[Videos] Fetching details for a specific video...")
-#             # Rickroll as a test
-#             video_info = await scout.get_video("dQw4w9WgXcQ")
-#             if video_info:
-#                 scout.set_test_mode(True)
-#                 scout.save_test_data(video_info, "video")
-#                 print(
-#                     f"  [Video Info] Title: {video_info.get('title', {}).get('runs', [{}])[0].get('text')}")
-
-#         async def do_test():
-#             print("[Test] Extracting video info from mobile page...")
-#             video_info_list = await scout.get_video_info_list([
-#                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-#                 # "https://www.youtube.com/watch?v=3JZ_D3ELwOQ",
-#                 # "https://www.youtube.com/watch?v=F9WUbRdUyhQ",
-#             ])
-#             if video_info_list:
-#                 scout.set_test_mode(True)
-#                 scout.save_test_data(video_info_list, "video_list")
-
-#         await asyncio.gather(do_search(), do_channel(), do_videos())
-
-# if __name__ == "__main__":
-#     print("--- VeasNa[Black-Cyber]=> System Root Executing ---")
-#     asyncio.run(run_multitasking_scout())
