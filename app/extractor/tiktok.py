@@ -297,13 +297,16 @@ class TikTokExtractor(TikTokBaseIE):
         url = self._LINK_ID % self._TEST_VIDEO_ID
         url, _video_id = self.get_url_video_id(url)
         self.logger.debug(f"Video URL: {url}, {_video_id}")
-        # info_list = await self.get_video_info_list([url])
+        info_list = await self.get_video_info_list([url])
         # info_list = self.load_test_data()
-        from yt_dlp import YoutubeDL
+        # from yt_dlp import YoutubeDL
 
-        with YoutubeDL() as ydl:
-            info = ydl.extract_info(url, download=True)
-            info_list = [info]
+        # yt_dl_options = {
+        #     'outtmpl': f'{self.get_output_dir()}/test/%(title)s.%(ext)s'
+        # }
+        # with YoutubeDL(yt_dl_options) as ydl:
+        #     info = ydl.extract_info(url, download=False)
+        #     info_list = [info]
         if info_list:
             self.save_test_data(info_list)
         return info_list
