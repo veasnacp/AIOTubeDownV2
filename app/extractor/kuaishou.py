@@ -478,7 +478,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
 
         return {"error": "All retry attempts failed."}
 
-    async def extract_video_info_list(
+    async def get_video_info_list(
         self, url_list: list[str],
         cookie_input: str | Dict[str, str] | None = None,
         retries: int = 3,
@@ -659,7 +659,7 @@ async def run_multitasking_scout():
 
         async def do_videos():
             print("[Videos] Fetching details for a specific video...")
-            result = await scout.extract_video_info_list(
+            result = await scout.get_video_info_list(
                 [
                     scout._LINK_VIDEO_WITH % "3xspaqvq478ugtw?user_id=3x36h86rp4kvnzs",
                     scout._LINK_VIDEO_WITH % "3x25by2mwk82ute",

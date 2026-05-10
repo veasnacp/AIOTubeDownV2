@@ -221,7 +221,8 @@ class AsyncBaseRequest:
         cookies: Optional[Union[str, Dict]] = None,
         allow_redirects: bool = True,
         impersonate: BrowserTypeLiteral = None,
-        retries: int = 2
+        retries: int = 2,
+        **kwargs
     ) -> Union[Response, None]:
         """
         The core execution method with built-in retry logic.
@@ -249,7 +250,8 @@ class AsyncBaseRequest:
                     proxy=proxy,
                     timeout=self.timeout,
                     allow_redirects=allow_redirects,
-                    impersonate=impersonate or self.impersonate
+                    impersonate=impersonate or self.impersonate,
+                    **kwargs
                 )
 
                 return response

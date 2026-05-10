@@ -5,26 +5,33 @@ import re
 import time
 from datetime import datetime
 from math import ceil
-from typing_extensions import Any, Dict, List, Optional
+from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-from curl_cffi.requests import AsyncSession, Session
+from curl_cffi.requests import AsyncSession, BrowserTypeLiteral, Session
+from typing_extensions import Any, Dict, List, Optional
 
+from ._request import ExtractorBase, Response, search_dict
+
+current_dir = Path(__file__).parent
 
 headers_mob = {
     'User-Agent': "Mozilla/5.0 (Linux; Android 8.0; Pixel 2 Build/OPD3.170816.012) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Mobile Safari/537.36 Edg/87.0.664.66"
 }
 
 
-class DouyinBaseIE:
+class DouyinBaseIE(ExtractorBase):
     """
     Douyin Base Class for extracting video information and downloading videos from douyin.com
     """
-    request_session: Session = Session(impersonate="chrome120")
-    _HOST_DOMAIN = "https://www.douyin.com/"
+    _BASE_URL = "https://www.douyin.com"
     _LINK_USER_WITH = "https://www.douyin.com/user/%s"
+    _LINK_USER_MOBIEL_WITH = "https://www.iesdouyin.com/share/user/%s"
     _LINK_VIDEO_WITH = "https://www.douyin.com/video/%s"
     _LINK_VIDEO_MOBILE_WITH = "https://m.douyin.com/share/video/%s"
+    _CLOUD_FOLDER = "videos/douyin"
+    _TEST_VIDEO_ID = "7294586291344264458"
+    _TEST_USER_ID = "MS4wLjABAAAA386t1T1jRuO-twAHWyqnwyZUyJ5S97eXG-Bq4pMW6TxOjJwes9Ee75lHbnJ6mjD9"
 
     _API_DOWNLOAD_VIDEO = "https://aweme.snssdk.com/aweme/v1/play/?aid=6383&video_id=%s"
     _API_DOWNLOAD_VIDEO_WATERMARK = "https://aweme.snssdk.com/aweme/v1/playwm/?aid=6383&video_id=%s"
@@ -60,7 +67,7 @@ class DouyinBaseIE:
         "aweme_id": "7346529921793051941"
     }
 
-    douyinHeaders = {
+    _SECURE_HEADERS = {
         'connection': 'keep-alive',
         'content-encoding': 'br',
         'content-security-policy': 'upgrade-insecure-requests;report-to default;frame-ancestors self',
@@ -71,22 +78,31 @@ class DouyinBaseIE:
         query = '&'.join(f'{key}={value}' for key, value in params.items())
         return f"{url}?{query}"
 
-    def get_sec_uid(self, url_uid: str):
+    def get_user_url_sec_uid(self, url_uid: str, is_mobile=False):
         url = url_uid.strip()
         if "v.douyin.com" in url:
-            r = self.request_session.get(url)
+            r = self.request_sync(url)
+            if not isinstance(r, Response) or not r.ok:
+                raise Exception(f"[-] Invalid response from {url}")
             url = r.headers.get("Location") or r.url
             sec_uid = str(url).split("/user/")[1].split("?")[0]
         elif "/user/" in url:
             sec_uid = url.split("/user/")[1].split("?")[0].split('/')[0]
         else:
             sec_uid = url
-        return sec_uid
+
+        if is_mobile:
+            url = self._LINK_USER_MOBIEL_WITH % sec_uid
+        else:
+            url = self._LINK_USER_WITH % sec_uid
+        return url, sec_uid
 
     def get_video_id(self, url_vid: str):
         url = url_vid.strip()
         if "v.douyin.com" in url:
-            r = self.request_session.get(url)
+            r = self.request_sync(url)
+            if not isinstance(r, Response) or not r.ok:
+                raise Exception(f"[-] Invalid response from {url}")
             url = r.headers.get("Location") or r.url
             video_id = str(url).split("/video/")[1].split("?")[0]
         elif "?modal_id=" in url:
@@ -97,11 +113,13 @@ class DouyinBaseIE:
             video_id = url
         return re.sub(r"\D", "", video_id)
 
-    def fix_video_url(self, url: str, is_mobile=False):
+    def get_url_video_id(self, url: str, is_mobile=False):
         video_id = self.get_video_id(url)
         if is_mobile:
-            return self._LINK_VIDEO_MOBILE_WITH % video_id
-        return self._LINK_VIDEO_WITH % video_id
+            url = self._LINK_VIDEO_MOBILE_WITH % video_id
+            return url, video_id
+        url = self._LINK_VIDEO_WITH % video_id
+        return url, video_id
 
     def extract_node(self, node: dict) -> dict[str, any]:
         is_default_api = isinstance(node.get("video"), dict)
@@ -232,131 +250,174 @@ class DouyinBaseIE:
 
 
 class DouyinRequest(DouyinBaseIE):
-    def __init__(self):
-        super().__init__()
-        self.is_stopped = False
-
-    def stop_extraction(self):
-        self.is_stopped = True
-
-    def on_callback_progress(self, video_info: dict):
-        pass
-
-    def callback_progress(self, video_info: dict):
-        self.on_callback_progress(video_info)
-
-
-class AsyncDouyinExtractor(DouyinRequest):
-    def __init__(self, proxies: Optional[List[str]] = None):
-        self.proxies = proxies
-        # Douyin strictly checks TLS fingerprints; chrome120 is essential
-        self.session = AsyncSession(impersonate="chrome")
-        self.headers = {
-            "Accept": "*/*", **headers_mob, **self.douyinHeaders
+    def __init__(self, proxies: Optional[List[str]] = None, impersonate: BrowserTypeLiteral = "safari170", timeout: int = 30):
+        super().__init__(proxies, impersonate, timeout)
+        self.mobile_headers = {
+            "Accept": "*/*", **headers_mob, **self._SECURE_HEADERS
         }
 
-    async def __aenter__(self): return self
-    async def __aexit__(self, *args): await self.session.close()
 
+class DouyinExtractor(DouyinRequest):
     def _get_proxy(self):
-        if not self.proxies:
+        return self._get_random_proxy()
+
+    async def _get_html_content(self, url: str):
+        response = await self.request(url, headers=self.mobile_headers, impersonate="chrome131_android")
+
+        if not isinstance(response, Response):
+            self.logger.error(f"[-] Invalid response: {response}")
             return None
-        return {"http": random.choice(self.proxies), "https": random.choice(self.proxies)}
 
-    @staticmethod
-    def parse_cookie_string(cookie_str: str) -> Dict[str, str]:
-        if not cookie_str:
-            return {}
-        return {item.split('=', 1)[0].strip(): item.split('=', 1)[1].strip()
-                for item in cookie_str.split(';') if '=' in item}
+        content = response.text
+        if self._IS_TESTING:
+            suffix = '_user' if '/user/' in url else ''
+            self.save_html_text(content, suffix)
+        if not response.status_code == 200:
+            self.logger.error(f"[-] Invalid response: {response}")
+            return None
 
-    async def get_video_detail(self, url: str, cookie_input: Optional[str] = None):
+        self.logger.info(
+            f"[*] Received response: {response.status_code} for {url}")
+
+        return content
+
+    async def _get_html_video_content(self, url: str):
+        try:
+            content = await self._get_html_content(url)
+
+            if not content:
+                return None
+
+            if 'window._ROUTER_DATA' in content:
+                if 'img_bitrate' in content:
+                    return content
+                else:
+                    self.logger.error(
+                        f"[-] Video has not been Found with URL: {url}")
+            else:
+                self.logger.error(f"[-] No _ROUTER_DATA with URL: {url}")
+        except Exception as e:
+            self.logger.error(f"[-] Request failed: {str(e)}")
+            return None
+        return None
+
+    async def get_video_info(self, url: str):
         """
         Fetches Douyin HTML and extracts window._ROUTER_DATA
         """
-        cookies = self.parse_cookie_string(
-            cookie_input) if cookie_input else None
+        url, video_id = self.get_url_video_id(url, True)
+        self.logger.info(f"[*] Extracting Douyin: {url}")
 
-        url = self.fix_video_url(url, True)
-        print(f"[*] Extracting Douyin: {url}")
+        content = await self._get_html_video_content(url)
+        if content is None:
+            return None
 
-        video_not_found = False
         try:
-            response = await self.session.get(
-                url,
-                proxy=self._get_proxy(),
-                headers=self.headers,
-                cookies=cookies,
-                # timeout=15
-            )
+            matches = re.search(
+                r'(window\._ROUTER_DATA = )(.*?)(<\/script>)', content)
+            string_data = [c for c in matches.groups(
+            ) if 'img_bitrate' in c][0] if matches else None
 
-            print(f"[*] Received response: {response.status_code} for {url}")
+            if not string_data:
+                return None
 
-            content = response.text
-            with open("./douyin_page.html", "w", encoding="utf-8") as f:
-                f.write(content)
-            if 'window._ROUTER_DATA' in content:
-                if 'img_bitrate' in content:
-                    matches = re.search(r'(window\._ROUTER_DATA = )(.*?)(<\/script>)', content)
-                    string_data = [c for c in matches.groups() if 'img_bitrate' in c][0] if matches else None
-                    # print(type(string_data), matches)
-                    if string_data:
-                        dict_data = json.loads(string_data)
-                        data = next(search_dict(dict_data, "item_list"), None)
-                        if isinstance(data, list):
-                            videoInfo = data[0]
-                            # with open("./extractor/test/facebook_test_.json", "w") as f:
-                            #   f.write(json.dumps(videoInfo, indent=2))
-                            info_dict = self.extract_node(videoInfo)
-                            self.callback_progress(info_dict)
-                        if with_url_dl is True:
-                            info_dict = self.dict_to_url_quote(info_dict)
-                else:
-                    print("Error => Video has not been Found with URL: ", url)
-                    video_not_found = True
-            else:
-                print("Error => No _ROUTER_DATA with URL: ", url)
+            dict_data = json.loads(string_data)
+            data = next(search_dict(dict_data, "item_list"), None)
+            if not isinstance(data, list):
+                return None
 
-            if 'window._ROUTER_DATA' in content:
-                # Optimized regex to capture the JSON object specifically
-                matches = re.search(
-                    r'window\._ROUTER_DATA\s*=\s*(.*?)</script>', content, re.S)
-                print(f"[*] Extracted _ROUTER_DATA: {matches.group(1)[:100]}...") if matches else print(
-                    "[*] _ROUTER_DATA not found in the page.")
-                if matches:
-                    try:
-                        string_data = matches.group(1).strip()
-                        dict_data = json.loads(string_data)
-                        return self.extract_douyin_logic(dict_data)
-                    except json.JSONDecodeError as e:
-                        return {"error": f"JSON Decode Failed: {e}"}
-
-            return {"error": "Could not find _ROUTER_DATA. Possible CAPTCHA or blocked IP."}
-
+            item_info = data[0]
+            info_dict = self.extract_node(item_info)
+            self._on_extracting({
+                "status": "progress",
+                "url": url,
+                "data": info_dict
+            })
+            return info_dict
         except Exception as e:
-            return {"error": f"Request failed: {str(e)}"}
+            self.logger.error(f"[-] Failed to extract video info: {str(e)}")
+            return None
 
-    def extract_douyin_logic(self, data: Dict) -> Dict:
-        """
-        Navigates the complex _ROUTER_DATA tree to find video info.
-        """
-        info = self.extract_node(data)
-        # with open("douyin_extracted_info.json", "w", encoding="utf-8") as f:
-        #     json.dump(info, f, indent=2, ensure_ascii=False)
-        return info
+    async def get_video_info_list(self, url_list: List[str]):
+        info = await self.get_video_info(url_list[0])
+        return [info] if info else None
 
-# --- Execution ---
+    async def get_video_info_list_from_profile(self, url_uid: str):
+        url, sec_uid = self.get_user_url_sec_uid(url_uid, True)
+        self.logger.info(f"[*] Extracting Douyin Profile: {url}, {sec_uid}")
+        content = await self._get_html_content(url)
+        if content is None:
+            return None
+
+        return content
+
+    async def test_get_video_info_list_from_user(self):
+        self._skip_cached_info = True
+        url = self._LINK_USER_WITH % self._TEST_USER_ID
+        self.logger.debug(f"Video URL: {url}")
+
+        info_list = await self.get_video_info_list_from_profile(url)
+        return info_list
+
+    async def test_get_video_info_list(self):
+        self._skip_cached_info = True
+        url = self._LINK_VIDEO_WITH % self._TEST_VIDEO_ID
+        url, _video_id = self.get_url_video_id(url, True)
+        self.logger.debug(f"Video URL: {url}, {_video_id}")
+        info_list = await self.get_video_info_list([url])
+        # info_list = self.load_test_data()
+        if info_list:
+            self.save_test_data(info_list)
+        return info_list
 
 
-# async def test_douyin():
-#     target = "https://www.douyin.com/video/7294586291344264458"
-#     async with AsyncDouyinExtractor() as extractor:
-#         result = await extractor.get_video_detail(target)
-#         if 'error' in result:
-#             print(f"Error: {result['error']}")
-#         else:
-#             with open("douyin_video_info.json", "w", encoding="utf-8") as f:
-#                 json.dump(result, f, indent=2, ensure_ascii=False)
+sec_uid = "MS4wLjABAAAA386t1T1jRuO-twAHWyqnwyZUyJ5S97eXG-Bq4pMW6TxOjJwes9Ee75lHbnJ6mjD9"
+base_url = "https://www.iesdouyin.com/web/api/v2/aweme/post/"
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://www.iesdouyin.com",
+}
 
-# if __name__ == "__main__":
-#     asyncio.run(test_douyin())
+
+async def get_all_videos(count_per_page=15, limit=2,):
+    all_videos = []
+    max_cursor = 0
+    has_more = True
+
+    while has_more:
+        if len(all_videos) >= limit:
+            break
+        params = {
+            "sec_uid": sec_uid,
+            "count": count_per_page,
+            "max_cursor": max_cursor,
+            "aid": "1988",  # required
+            "source": "2",
+        }
+        session = AsyncSession(impersonate="safari170")
+        resp: Response = await session.get(base_url, params=params, timeout=30)
+
+        print("URL:", resp.url)
+        print(f"[-] Content: {resp.text}")
+
+        try:
+            data = json.loads(resp.text)
+        except Exception as e:
+            print(f"[-] Error: {e}")
+            print(f"[-] Content: {resp.text}")
+            break
+
+        if data.get("status_code") != 0:
+            print(f"Error: {data}")
+            break
+
+        aweme_list = data.get("aweme_list", [])
+        all_videos.extend(aweme_list)
+
+        max_cursor = data.get("max_cursor", 0)
+        has_more = data.get("has_more", 0) == 1
+
+        print(
+            f"Fetched {len(aweme_list)} videos, cursor: {max_cursor}, more: {has_more}")
+
+    return all_videos

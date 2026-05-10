@@ -1,12 +1,11 @@
 
 from app.test_extract import test_all
 
+# def test_db():
+#     from app.db.database import db
 
-def test_db():
-    from app.db.database import db
-
-    tasks = db.get_all_tasks()
-    print(tasks)
+#     tasks = db.get_all_tasks()
+#     print(tasks)
 
 
 if __name__ == "__main__":
