@@ -30,7 +30,8 @@ def test_tiktok_extractor():
 
     tiktok = TikTokExtractor()
     tiktok.set_test_mode(True)
-    asyncio.run(tiktok.test_get_video_info_list())
+    # asyncio.run(tiktok.test_get_video_info_list())
+    asyncio.run(tiktok.test_get_video_info_list_from_user())
 
     # info_list = tiktok.load_test_data()
     # if info_list:
