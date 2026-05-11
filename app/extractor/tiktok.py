@@ -527,7 +527,7 @@ class TikTokExtractor(TikTokBaseIE):
 
         return video_info_list
 
-    async def get_video_info_list_from_profile_tikwm(
+    async def extract_info_profile_tikwm(
         self,
         url_uid: str,
         limit: int = None,
@@ -650,7 +650,7 @@ class TikTokExtractor(TikTokBaseIE):
             self.logger.debug(f"_extract_sec_uid_from_embed error: {err}")
             return None
 
-    async def get_video_info_list_from_profile(
+    async def extract_info_profile(
         self,
         url_uid: str,
         limit: int = None,
@@ -751,8 +751,7 @@ class TikTokExtractor(TikTokBaseIE):
                 if not hasMore or count == limit_copy:
                     break
             except ValueError as err:
-                self.logger.debug(
-                    f"get_video_info_list_from_profile error: {err}")
+                self.logger.debug(f"extract_info_profile error: {err}")
                 raise Exception(err, url_uid)
 
         if len(video_info_list) <= 0:
@@ -779,7 +778,7 @@ class TikTokExtractor(TikTokBaseIE):
         url = self._LINK_USERNAME % 'uddomp'
         self.logger.debug(f"Video URL: {url}")
 
-        info_list = await self.get_video_info_list_from_profile(url, None, cursor_continue='1711793427000', cursor_position=9, use_per_next_cursor=False)
+        info_list = await self.extract_info_profile(url, None, cursor_continue='1711793427000', cursor_position=9, use_per_next_cursor=False)
         if info_list:
             previous_data = self.load_test_data('_user')
             if previous_data:
@@ -794,17 +793,7 @@ class TikTokExtractor(TikTokBaseIE):
         url, _video_id = self.get_url_video_id(url)
         self.logger.debug(f"Video URL: {url}, {_video_id}")
         info_list = await self.get_video_info_list([url])
-        # info_list = self.load_test_data()
-        # from yt_dlp import YoutubeDL
-        # from yt_dlp.networking.impersonate import ImpersonateTarget
 
-        # yt_dl_options = {
-        #     'outtmpl': f'{self.get_output_dir()}/test/%(title)s.%(ext)s',
-        # }
-        # url = "https://www.tiktok.com/@zamircairina1"
-        # with YoutubeDL(yt_dl_options) as ydl:
-        #     info = ydl.extract_info(url, download=False)
-        #     info_list = [info]
         if info_list:
             self.save_test_data(info_list)
         return info_list
