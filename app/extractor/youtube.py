@@ -832,12 +832,14 @@ class YouTubeExtractor(YouTubeBaseIE):
             self.delay_jitter = True  # Enable delay jitter for large batches to avoid rate limiting
 
         tasks = []
+        valid_url_list = []
         async with semaphore:
             for url in url_list:
                 if self.cancel:
                     self.on_extracting({"status": "cancelled"})
                     break
                 url = self.get_video_url(url, True)
+                valid_url_list.append(url)
                 tasks.append(self.get_initial_data(url))
 
         html_list = await asyncio.gather(*tasks)
@@ -856,21 +858,21 @@ class YouTubeExtractor(YouTubeBaseIE):
                 #         return None
                 #     except Exception as err:
                 #         self.logger.error(
-                #             f"[YouTube] Error fetching JS for video {url_list[i]}: {err}")
+                #             f"[YouTube] Error fetching JS for video {valid_url_list[i]}: {err}")
                 #         return None
 
                 video_info = self.get_video_info(html)
                 self._on_extracting({
                     "status": "progress",
-                    "url": url_list[i],
+                    "url": valid_url_list[i],
                     "data": video_info
                 })
                 video_info_list.append(video_info)
             except Exception as err:
                 self.logger.error(
-                    f"[YouTube] Error processing video info for URL {url_list[i]}: {err}")
+                    f"[YouTube] Error processing video info for URL {valid_url_list[i]}: {err}")
                 self._on_extracting(
-                    {"error": str(err), "url": url_list[i], "status": "error"})
+                    {"error": str(err), "url": valid_url_list[i], "status": "error"})
                 continue
 
         return video_info_list

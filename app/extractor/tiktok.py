@@ -78,6 +78,8 @@ class TikTokBaseIE(ExtractorBase):
 
     def __init__(self, proxies: Optional[List[str]] = None, impersonate: BrowserTypeLiteral = "chrome120", timeout: int = 30):
         super().__init__(proxies, impersonate, timeout)
+        self.concurrent_tasks = 10
+        self.delay_jitter = False
         self.device_id = None
 
     @functools.cached_property
@@ -182,6 +184,7 @@ class TikTokBaseIE(ExtractorBase):
                         continue
                     _url = _url_list[-1]
                     if _url and "faid=1988" in _url and "signaturev3=" in _url:
+                        _url = _url.replace("faid=1988", "faid=1180")
                         _width = int(_play_addr.get("Width", 0))
                         _height = int(_play_addr.get("Height", 0))
                         _vcodec = item.get("CodecType", "unknown")
@@ -235,7 +238,7 @@ class TikTokBaseIE(ExtractorBase):
 
         user_keys = ["id", "nickname", "avatar", "avatarLarger",
                      "avatarMedium", "avatarThumb", "signature", "secUid"]
-        # user_keys = ["avatar_thumb","follower_count","total_favorited","sec_uid","unique_id_modify_time","cover_url"]
+
         user_info = {
             "username": user_id
         }
@@ -439,6 +442,10 @@ class TikTokExtractor(TikTokBaseIE):
         return wci_cookie_name, rci_cookie_name
 
     async def _get_html_content(self, url):
+        if self.delay_jitter:
+            # Human-like delay (Jitter) to avoid pattern detection
+            await asyncio.sleep(random.uniform(1.5, 4.0))
+
         async def get_webpage():
             response = await self.request(
                 url, headers=self._HEADERS_VIDEO_HTML,
@@ -489,18 +496,27 @@ class TikTokExtractor(TikTokBaseIE):
             return None
 
     async def get_video_info_list(self, url_list: List[str]) -> List[Dict[str, Any]]:
-        url_list = [self.get_url_video_id(url)[0] for url in url_list]
+        semaphore = asyncio.Semaphore(self.concurrent_tasks)
+        if len(url_list) > 15:
+            self.delay_jitter = True
 
         tasks = []
-        for url in url_list:
-            tasks.append(self._get_html_content(url))
+        valid_url_list = []
+        async with semaphore:
+            for url in url_list:
+                if self.cancel:
+                    self.on_extracting({"status": "cancelled"})
+                    break
+                url, _ = self.get_url_video_id(url)
+                valid_url_list.append(url)
+                tasks.append(self._get_html_content(url))
         content_list = await asyncio.gather(*tasks)
 
         video_info_list = []
         error_list = []
         user_info_dict = {}
         for i, content in enumerate(content_list):
-            url = url_list[i]
+            url = valid_url_list[i]
             if self.cancel:
                 break
             if not isinstance(content, str) or content == "":
@@ -721,15 +737,7 @@ class TikTokExtractor(TikTokBaseIE):
                     video_info['cursor'] = current_cursor
                     video_info['next_cursor'] = cursor if hasMore else ''
                     video_info['cursor_position'] = cursor_position
-                    # info_dict = video_info.get("info_dict", {})
-                    # print("[video_info]: ",info_dict.get("original_url"))
-                    # print("[view_count]: ", info_dict.get("view_count"))
-                    # print("[timestamp]: ", info_dict.get("timestamp"))
-                    # video_info.update(**{
-                    #   "view_count": info_dict.get("view_count"),
-                    #   "timestamp": info_dict.get("timestamp")
-                    # })
-                    # video_link = info_dict.get("url")
+
                     video_link = video_info.get("original_url")
                     video_list.append(video_link)
                     video_info_list.append(video_info)

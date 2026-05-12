@@ -288,12 +288,16 @@ class DownloadWorker(QRunnable):
         except Exception as e:
             logger.error(f"NodeRunner not found: {e}")
 
-        if self.options.get("mp3", False) and has_ffmpeg:
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }]
+        only_download_audio = self.options.get("mp3", False)
+        has_audio_url = False
+        if only_download_audio and has_ffmpeg:
+            has_audio_url = self.info and self.info.get('music')
+            if not has_audio_url:
+                ydl_opts['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }]
 
         try:
             with YoutubeDL(ydl_opts) as ydl:
@@ -303,14 +307,22 @@ class DownloadWorker(QRunnable):
                     logger.debug(
                         f"_info: {_info.get('url')}, is_both: {is_both}, video_url: {video_url}, audio_url: {audio_url}")
                     video_url = video_url or self.info['url']
-                    info = ydl.extract_info(
-                        video_url, download=True)
-                    if not is_both and audio_url:
-                        video_path_for_merge = ydl.prepare_filename(info)
-                        final_path = self.merge_video_and_audio(
-                            ydl_opts, video_path_for_merge, audio_url)
-                    else:
+                    if only_download_audio:
+                        if has_audio_url and audio_url:
+                            info = ydl.extract_info(audio_url, download=True)
+                        else:
+                            info = ydl.extract_info(video_url, download=True)
+
                         final_path = ydl.prepare_filename(info)
+                    else:
+                        info = ydl.extract_info(
+                            video_url, download=True)
+                        if not is_both and audio_url:
+                            video_path_for_merge = ydl.prepare_filename(info)
+                            final_path = self.merge_video_and_audio(
+                                ydl_opts, video_path_for_merge, audio_url)
+                        else:
+                            final_path = ydl.prepare_filename(info)
                 else:
                     info = ydl.extract_info(target_url, download=True)
                     final_path = ydl.prepare_filename(info)
@@ -318,10 +330,10 @@ class DownloadWorker(QRunnable):
                 # If merging or converting, extension might change
                 if self.options.get("mp3", False) and shutil.which("ffmpeg"):
                     final_path = final_path.rsplit('.', 1)[0] + ".mp3"
-                elif shutil.which("ffmpeg"):
+                # elif shutil.which("ffmpeg"):
                     # yt-dlp might merge to mp4 even if requested but prepare_filename might say .webm
                     # Actually ydl.prepare_filename usually reflects the merged extension if download=True succeeded
-                    pass
+                    # pass
 
                 self.filename = os.path.basename(final_path)
                 self.signals.filename_updated.emit(self.task_id, self.filename)

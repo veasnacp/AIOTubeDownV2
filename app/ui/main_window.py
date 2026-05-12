@@ -5,11 +5,7 @@ import darkdetect
 import loguru
 from PySide6.QtCore import QFile, QIODevice, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
-from PySide6.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QWidget,
-)
+from PySide6.QtWidgets import QApplication, QFileDialog, QWidget
 from PySide6Addons import (
     Action,
     FluentIcon,
@@ -144,6 +140,12 @@ class MainWindow(MSFluentWindow):
 
         self.titleBarHLayout = self.titleBar.hBoxLayout
 
+        self.setStyleSheet(
+            f'''
+            {self.styleSheet()}
+            MainWindow {{ font: 14 'Kantumruy Pro', 'Segoe UI', 'Microsoft YaHei', 'PingFang SC'; }}
+            '''
+        )
         self.setMicaEffectEnabled(False)
         self.set_theme('dark')
 

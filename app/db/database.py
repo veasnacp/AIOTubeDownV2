@@ -86,7 +86,7 @@ class Database:
         conn = self.get_connection()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM downloads ORDER BY date_added DESC")
+        cursor.execute("SELECT * FROM downloads ORDER BY date_added ASC")
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]

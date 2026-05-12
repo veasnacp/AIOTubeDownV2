@@ -252,6 +252,9 @@ class DouyinBaseIE(ExtractorBase):
 class DouyinRequest(DouyinBaseIE):
     def __init__(self, proxies: Optional[List[str]] = None, impersonate: BrowserTypeLiteral = "safari170", timeout: int = 30):
         super().__init__(proxies, impersonate, timeout)
+        self.concurrent_tasks = 10
+        self.delay_jitter = False
+
         self.mobile_headers = {
             "Accept": "*/*", **headers_mob, **self._SECURE_HEADERS
         }
@@ -282,6 +285,9 @@ class DouyinExtractor(DouyinRequest):
         return content
 
     async def _get_html_video_content(self, url: str):
+        if self.delay_jitter:
+            # Human-like delay (Jitter) to avoid pattern detection
+            await asyncio.sleep(random.uniform(1.5, 4.0))
         try:
             content = await self._get_html_content(url)
 
@@ -301,15 +307,11 @@ class DouyinExtractor(DouyinRequest):
             return None
         return None
 
-    async def get_video_info(self, url: str):
+    def get_video_info(self, content: str, url: str):
         """
         Fetches Douyin HTML and extracts window._ROUTER_DATA
         """
-        url, video_id = self.get_url_video_id(url, True)
-        self.logger.info(f"[*] Extracting Douyin: {url}")
-
-        content = await self._get_html_video_content(url)
-        if content is None:
+        if not content:
             return None
 
         try:
@@ -339,8 +341,25 @@ class DouyinExtractor(DouyinRequest):
             return None
 
     async def get_video_info_list(self, url_list: List[str]):
-        info = await self.get_video_info(url_list[0])
-        return [info] if info else None
+        semaphore = asyncio.Semaphore(self.concurrent_tasks)
+        if len(url_list) > 15:
+            self.delay_jitter = True
+
+        tasks = []
+        valid_url_list = []
+        async with semaphore:
+            for url in url_list:
+                if self.cancel:
+                    self.on_extracting({"status": "cancelled"})
+                    break
+
+                valid_url_list.append(url)
+                tasks.append(self._get_html_video_content(url))
+
+        contents = await asyncio.gather(*tasks)
+        info_list = [self.get_video_info(content, url)
+                     for content, url in zip(contents, valid_url_list) if content]
+        return info_list
 
     async def get_video_info_list_from_profile(self, url_uid: str):
         url, sec_uid = self.get_user_url_sec_uid(url_uid, True)

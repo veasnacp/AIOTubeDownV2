@@ -272,7 +272,7 @@ class KuaishouBaseIE(ExtractorBase):
         }
 
 
-class AsyncKuaishouExtractor(KuaishouBaseIE):
+class KuaishouExtractor(KuaishouBaseIE):
     USER_PAYLOAD = {
         "operationName": "visionProfilePhotoList",
         "variables": {
@@ -490,9 +490,15 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
             self.delay_jitter = True  # Enable jitter for large batches to avoid detection
 
         tasks = []
+        valid_url_list = []
         async with semaphore:
             for url in url_list:
+                if self.cancel:
+                    self.on_extracting({"status": "cancelled"})
+                    break
+
                 video_id, user_id = self.get_video_id_and_user_id(url)
+                valid_url_list.append(url)
                 tasks.append(
                     self.get_initial_data(
                         video_id, user_id, cookie_input, retries, backoff)
@@ -501,19 +507,25 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
         task_list = await asyncio.gather(*tasks)
         video_info_list = []
         for i, task in enumerate(task_list):
+            url = valid_url_list[i]
             if not isinstance(task, tuple):
                 task = task['error'] if isinstance(task, dict) and 'error' in task \
                     else "Unknown error during fetch."
-                self.report_callback({"error": task})
+                self._on_extracting(
+                    {"error": task, "url": url, "status": "error"})
                 continue
             try:
                 video_id, user_id, html = task
                 video_info = self.get_video_info(html, video_id, user_id)
-                self.report_callback(video_info)
                 video_info_list.append(video_info)
+                self._on_extracting({
+                    "status": "progress",
+                    "url": url,
+                    "data": video_info
+                })
             except Exception as err:
-                self.report_callback({"error": str(err)})
-                continue
+                self._on_extracting(
+                    {"error": str(err), "url": url, "status": "error"})
 
         return video_info_list
 
@@ -653,7 +665,7 @@ class AsyncKuaishouExtractor(KuaishouBaseIE):
 
 async def run_multitasking_scout():
     raw_cookies = "did=web_db214ac2bfa3481494d80da73924f80c"
-    async with AsyncKuaishouExtractor() as scout:
+    async with KuaishouExtractor() as scout:
         print("[*] Launching simultaneous scan...")
         scout.set_test_mode(True)
 
@@ -685,8 +697,3 @@ async def run_multitasking_scout():
             result = await scout.get_live_profile_videos(url_uid, )
 
         await asyncio.gather(do_videos())
-
-
-# if __name__ == "__main__":
-#     print("--- VeasNa[Black-Cyber]=> System Root Executing ---")
-#     asyncio.run(run_multitasking_scout())
