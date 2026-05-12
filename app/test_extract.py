@@ -122,9 +122,9 @@ def test_shortmovs_extractor():
 
 
 def test_rushtv_extractor():
-    from .extractor.drama import RushTvExtractor
+    from .extractor.drama import RushShortsTvExtractor
 
-    rushtv = RushTvExtractor()
+    rushtv = RushShortsTvExtractor()
     # asyncio.run(rushtv.test_get_drama_info())
     rushtv.set_test_mode(True)
     info = rushtv.load_test_data()

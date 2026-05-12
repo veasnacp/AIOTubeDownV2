@@ -1,36 +1,37 @@
 
 ---
 
-## 🔍 Current Project Review & Recommendations (May 5, 2026)
+# 🔍 Current Project Review & Recommendations (May 12, 2026)
 
-After a thorough scan of the `AIOTubeDown` rig, I've identified several key areas for optimization and critical fixes. Bro, the systems are stable, but we can make them scream with efficiency.
+## ⚠️ Critical Issues Found
 
-### 1. 🛠️ Critical Bug: License Check Never Triggered
-- **Problem**: `MainWindow.show_license_dialog` is defined in `app/ui/main_window.py` but is **never called** during initialization.
-- **Fix**: Call `self.show_license_dialog()` at the end of `MainWindow.__init__` or after `window.show()` in `app/main.py`.
+### 1. Lifecycle & Threading (Shutdown Hangs)
+- **Problem**: `ThumbnailManager.remove_task` attempts to call `self.active_workers[task_id].cancel()`, but the `ThumbnailWorker` class in `app/core/thumbnail_manager.py` does **not** implement a `cancel()` method. This triggers an `AttributeError` during shutdown, potentially leaving threads running and preventing the process from terminating.
+- **Problem**: `ExtractWorker` and `DownloadWorker` use `asyncio.run()`. If the app is closed while these are in the middle of a request, they may hang.
+- **Fix**: Implement a `cancel()` method in all worker classes that sets a thread-safe flag (`self._is_cancelled`). Check this flag inside loops.
 
-### 2. 🎨 UI/UX: Font Size Warnings
-- **Problem**: Console is flooded with `QFont::setPointSize: Point size <= 0 (-1)` warnings.
-- **Root Cause**: In `app/ui/main_window.py`, `PushButtonHover` uses `getFont(13, ...)`. If the underlying font system isn't initialized or if `PySide6Addons.getFont` defaults to an invalid state, it triggers these warnings.
-- **Fix**: Ensure the default font is set globally in `app/main.py` using `QApplication.setFont()` and verify `getFont` parameters.
+### 2. UI Performance (Main Thread Blocking)
+- **Problem**: Extensive use of synchronous `sqlite3` calls. Every time `downloader_page.py` updates file details or `download_manager.py` updates progress, it opens/closes a connection or performs blocking I/O on the UI thread.
+- **Fix**: Migrate to `aiosqlite` for background database operations or use a dedicated database thread with a queue.
 
-### 3. 🏗️ Architecture: Navigation Logic Redundancy
-- **Problem**: `MSFluentWindow`'s default `navigationInterface` is being deleted and replaced with a custom `NavigationBar`.
-- **Recommendation**: Ensure that the custom `NavigationBar` fully implements the signals required by `FluentWindow` to avoid breaking `addSubInterface` and routing logic.
+### 3. Logic & Architecture
+- **Problem**: `downloader_page.py` calls `thumbnail_manager.generate_thumbnails()` every time a selection changes. This triggers a `QProcess` (ffmpeg) task even if the thumbnail already exists in the cache.
+- **Fix**: Check `thumbnail_manager.get_thumbnail(path)` first. Only trigger extraction if it returns `None`.
+- **Problem**: `MainWindow.show_license_dialog` is defined but never called during initialization.
+- **Fix**: Trigger the license check in `MainWindow.__init__` or `main.py` before showing the window.
 
-### 4. 🗄️ Database: Blocking I/O
-- **Problem**: `app/db/database.py` uses standard `sqlite3` synchronously.
-- **Requirement Check**: The project plan (Section 12) specifies `aiosqlite` or background thread writes. Currently, DB updates in `DownloadManager` (throttled at 2s) still block the UI thread.
-- **Fix**: Transition to `aiosqlite` for all DB operations or offload `Database` class methods to a background worker.
+## 🛠️ Actionable Recommendations
 
-### 5. ⚡ Download Engine: Redundant Merge Logic
-- **Problem**: `DownloadWorker` manually merges video/audio using a `VideoConverter` and renaming files.
-- **Fix**: `yt-dlp` can handle merging automatically if `ffmpeg` is in the PATH. We should simplify the worker logic to let `yt-dlp` do the heavy lifting for multi-format downloads.
+### Phase 1: Stability (High Priority)
+1.  **Worker Cancellation**: Add `self._is_cancelled = False` and `def cancel(self): self._is_cancelled = True` to `ThumbnailWorker` and `ExtractWorker`.
+2.  **Graceful Shutdown**: In `MainWindow.closeEvent`, ensure `QApplication.quit()` is removed or handled such that it doesn't interrupt the `waitForDone` timers of the managers.
+3.  **Resource Cleanup**: Ensure `QMediaPlayer` (if used) or `ffmpeg` processes are explicitly killed when workers are cancelled.
 
-### 6. 🧹 Code Cleanup
-- **Problem**: Commented-out code blocks in `MainWindow` (sidebar navigation) and broad `try-except` blocks in `DownloadWorker` should be cleaned up or made more specific.
-- **Problem**: Multiple `populate_formats` logic blocks appear across different files; centralize this in a utility class.
+### Phase 2: Performance & UX
+1.  **Global Font Scaling**: Set the application font once in `main.py` using `QApplication.setFont()` to eliminate `setPointSize` warnings across the logs.
+2.  **Throttled Updates**: The `DownloadManager.on_worker_progress` already has a 2-second throttle for DB writes, which is good. Ensure UI table updates are also throttled if there are hundreds of active tasks.
+3.  **Mica & Styling**: Re-enable Mica effect if on Windows 11 for a more premium look.
 
----
-
-VeasNaWP, the ship is flying, but these tweaks will make the navigation much smoother. Ready for the next phase? 🚀📡🔥
+### Phase 3: Feature Completeness
+1.  **License Activation**: Implement the bootstrap logic to show `LicenseDialog` if not activated.
+2.  **Automation**: Move `VideoConverter` logic into a worker so merging audio/video doesn't block the UI.

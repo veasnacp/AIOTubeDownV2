@@ -60,7 +60,7 @@ from ..extractor.drama import (
     DramaExtractorBase,
     ProgressData,
     ReelShortExtractor,
-    RushTvExtractor,
+    RushShortsTvExtractor,
     ShortMovsExtractor,
     StardustTvExtractor,
 )
@@ -69,7 +69,7 @@ from ..theme import Colors, DarkMode, LightMode
 TYPE_DRAMA_EXTRACTOR: TypeAlias = Optional[Union[
     'DramaExtractorBase',
     'DramaBiteExtractor', 'DramaBoxExtractor',
-    'ReelShortExtractor', 'RushTvExtractor',
+    'ReelShortExtractor', 'RushShortsTvExtractor',
     'ShortMovsExtractor', 'StardustTvExtractor'
 ]]
 
@@ -78,7 +78,7 @@ REGEX_DRAMA = [
     (DramaBiteExtractor._BASE_URL, DramaBiteExtractor),
     (DramaBoxExtractor._BASE_URL, DramaBoxExtractor),
     (ReelShortExtractor._BASE_URL, ReelShortExtractor),
-    (RushTvExtractor._BASE_URL, RushTvExtractor),
+    (RushShortsTvExtractor._BASE_URL, RushShortsTvExtractor),
     (ShortMovsExtractor._BASE_URL, ShortMovsExtractor),
     (StardustTvExtractor._BASE_URL, StardustTvExtractor),
 ]
@@ -807,9 +807,12 @@ class DramaDownloader(QWidget):
         super().closeEvent(event)
 
     def scroll_to_bottom(self, msg: str):
-        self.log_output.append(msg.strip())
-        self.log_output.verticalScrollBar().setValue(
-            self.log_output.verticalScrollBar().maximum())
+        try:
+            self.log_output.append(msg.strip())
+            self.log_output.verticalScrollBar().setValue(
+                self.log_output.verticalScrollBar().maximum())
+        except Exception as e:
+            self.logger.debug(f"Exception in scroll_to_bottom: {e}")
 
     def test_show_episodes(self, title, count):
         self.ep_range.setText(f"(1-{count})")
@@ -909,6 +912,8 @@ class DramaDownloader(QWidget):
             return
 
         extractor_name = extractor.__class__.__name__
+        self.logger.debug(f"Extractor name: {extractor_name}")
+        self.logger.debug(f"Object name: {object_name}")
         if not is_default_object_name and not object_name.split('_')[0] in extractor_name.lower():
             self.empty_eps_label.setText(self.empty_eps_not_found)
             self.stackWidget.setCurrentWidget(self.empty_eps_widget)

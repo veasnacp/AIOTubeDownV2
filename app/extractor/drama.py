@@ -1462,7 +1462,7 @@ class ShortMovsExtractor(DramaExtractorBase):
         return info
 
 
-class RushTvExtractor(DramaExtractorBase):
+class RushShortsTvExtractor(DramaExtractorBase):
     _BASE_URL = "https://www.rushshortstv.com"
     _LINK_ID = "https://www.rushshortstv.com/video?id=%s"
     _BASE_CDN = "https://resource.rushshortstv.com"
