@@ -4,7 +4,7 @@ import random
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 from curl_cffi.requests import AsyncSession, BrowserTypeLiteral, RequestsError, Response
@@ -289,6 +289,8 @@ class KuaishouExtractor(KuaishouBaseIE):
         self.concurrent_tasks = 10  # Limit concurrent tasks to avoid rate limiting
         self.delay_jitter = False  # Disable human-like delay by default
 
+        self.cookies: Optional[Union[str, Dict[str, str]]] = None
+
         # self.base_headers = {
         #     "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         #     "accept-language": "en-US,en;q=0.9,km;q=0.8",
@@ -343,6 +345,9 @@ class KuaishouExtractor(KuaishouBaseIE):
 
     def _get_proxy(self):
         return self._get_random_proxy()
+
+    def set_cookies(self, cookies: Union[str, Dict[str, str]]):
+        self.cookies = cookies
 
     async def login_stealth(self):
         """Pre-heats the session by visiting the home page to get base cookies."""
@@ -480,10 +485,17 @@ class KuaishouExtractor(KuaishouBaseIE):
 
     async def get_video_info_list(
         self, url_list: list[str],
-        cookie_input: str | Dict[str, str] | None = None,
         retries: int = 3,
         backoff: float = 2.0
     ):
+        if self.cookies:
+            cookie_input = self.cookies
+        else:
+            res = await self.request(self._LINK_USER_WITH % "3x36kuaishou")
+            if isinstance(res, Response) and res.status_code == 200:
+                cookie_input = res.cookies.get_dict()
+                self.logger.debug(f"[*] Auto Cookies: {cookie_input}")
+
         # Use a Semaphore to control how many tasks run at once
         semaphore = asyncio.Semaphore(self.concurrent_tasks)
         if len(url_list) > 15:
@@ -668,6 +680,7 @@ async def run_multitasking_scout():
     async with KuaishouExtractor() as scout:
         print("[*] Launching simultaneous scan...")
         scout.set_test_mode(True)
+        scout.set_cookies(raw_cookies)
 
         async def do_videos():
             print("[Videos] Fetching details for a specific video...")
@@ -676,7 +689,6 @@ async def run_multitasking_scout():
                     scout._LINK_VIDEO_WITH % "3xspaqvq478ugtw?user_id=3x36h86rp4kvnzs",
                     scout._LINK_VIDEO_WITH % "3x25by2mwk82ute",
                 ],
-                cookie_input=raw_cookies,
                 retries=3
             )
             scout.logger.info(f"[Videos] Fetched {len(result)} videos.")

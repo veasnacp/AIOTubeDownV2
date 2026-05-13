@@ -231,6 +231,15 @@ class ExtractWorker(DefaultWorker):
                 async with extractor_class() as scout:
                     scout.cancel = self.cancel
 
+                    try:
+                        cookies = self.extract_options.get("cookies") or {}
+                        extractor_name = scout._CLOUD_FOLDER.split("/")[-1]
+                        raw_cookie = cookies.get(extractor_name)
+                        if hasattr(scout, "set_cookies") and raw_cookie:
+                            scout.set_cookies(raw_cookie)
+                    except Exception as e:
+                        scout.logger.debug(f"Set cookies error: {e}")
+
                     def on_callback_progress(d):
                         if d['status'] == 'progress':
                             self.signals.progress.emit(self.task_id, d)
@@ -269,9 +278,9 @@ class ExtractManager(QObject):
         self.last_data_update = {}  # task_id -> last_timestamp
         self.options = {}
 
-    def start_extraction(self, urls: list[str], extract_options: Optional[dict] = None):
+    def start_extraction(self, urls: list[str]):
         task_id = len(self.active_workers) + 1
-        worker = ExtractWorker(task_id, urls, extract_options)
+        worker = ExtractWorker(task_id, urls, self.options)
         worker.signals.progress.connect(self.task_progress.emit)
         worker.signals.finished.connect(self.task_finished.emit)
         worker.signals.error.connect(self.task_error.emit)
