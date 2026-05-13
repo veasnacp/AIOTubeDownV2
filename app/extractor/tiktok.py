@@ -666,7 +666,7 @@ class TikTokExtractor(TikTokBaseIE):
             self.logger.debug(f"_extract_sec_uid_from_embed error: {err}")
             return None
 
-    async def extract_info_profile(
+    async def get_video_info_list_from_user(
         self,
         url_uid: str,
         limit: int = None,
@@ -786,7 +786,7 @@ class TikTokExtractor(TikTokBaseIE):
         url = self._LINK_USERNAME % 'uddomp'
         self.logger.debug(f"Video URL: {url}")
 
-        info_list = await self.extract_info_profile(url, None, cursor_continue='1711793427000', cursor_position=9, use_per_next_cursor=False)
+        info_list = await self.get_video_info_list_from_user(url, None, cursor_continue='1711793427000', cursor_position=9, use_per_next_cursor=False)
         if info_list:
             previous_data = self.load_test_data('_user')
             if previous_data:

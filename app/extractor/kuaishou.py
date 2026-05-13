@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import json
 import random
 import re
@@ -7,7 +8,13 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
-from curl_cffi.requests import AsyncSession, BrowserTypeLiteral, RequestsError, Response
+from curl_cffi.requests import (
+    AsyncSession,
+    BrowserTypeLiteral,
+    RequestsError,
+    Response,
+    headers,
+)
 
 from ._request import ExtractorBase
 
@@ -23,14 +30,18 @@ class KuaishouBaseIE(ExtractorBase):
     _LIVE_API_USER_ID_WITH = "https://live.kuaishou.com/live_api/baseuser/userinfo/byid?principalId=%s"
     # _LIVE_API_VIDEO_WITH = "https://live.kuaishou.com/live_api/profile/feedbyid?photoId=3xywnx98nq9idw9&principalId=yy1885666"
 
-    _LINK_VIDEO_WITH = "https://www.kuaishou.com/short-video/%s"
-    _LINK_VIDEO_WITH_USER_ID = "https://www.kuaishou.com/short-video/%s?user_id=%s"
+    _LINK_VIDEO_ID = "https://www.kuaishou.com/short-video/%s"
+    _LINK_VIDEO_ID_WITH_USER_ID = "https://www.kuaishou.com/short-video/%s?user_id=%s"
     _LINK_USER_WITH = "https://www.kuaishou.com/profile/%s"
+
+    _LINK_VIDEO_ID_MOBILE = "https://v.m.chenzhongtech.com/fw/photo/%s"
 
     _MOBILE_API_VIDEO = "https://v.m.chenzhongtech.com/rest/wd/ugH5App/recommend/photos?__NS_sig3=564602313f371060630b0809334d9d4cfe230474171715151a1b1802"
 
     _MOBILE_API_USER_PROFILE = "https://c.kuaishou.com/rest/wd/feed/profile"
     _MOBILE_API_USER_INFO = "https://c.kuaishou.com/rest/wd/user/profile"
+
+    _TEST_VIDEO_ID = "3xspaqvq478ugtw"
 
     default_headers = {
         'Accept': '*/*',
@@ -50,8 +61,13 @@ class KuaishouBaseIE(ExtractorBase):
 
         return video_id
 
-    def fix_video_url(self, url_vid: str):
-        return self._LINK_VIDEO_WITH % self.get_video_id(url_vid)
+    def get_url_video_id(self, url_vid: str, is_mobile: bool = False):
+        video_id = self.get_video_id(url_vid)
+        if is_mobile:
+            url = self._LINK_VIDEO_ID_MOBILE % video_id
+        else:
+            url = self._LINK_VIDEO_ID % video_id
+        return url, video_id
 
     def get_video_id_and_user_id(self, url_vid_user_id: str):
         url = url_vid_user_id.strip()
@@ -271,6 +287,145 @@ class KuaishouBaseIE(ExtractorBase):
             "extractor": "kuaishou_live"
         }
 
+    def transform_to_ytdlp_formats(self, data: List[Dict]):
+        ytdlp_formats = []
+
+        for item in data:
+            fmt = {
+                "format_id": f"{item.get('id')}-{item.get('qualityType')}-{item.get('videoCodec')}",
+                "ext": "mp4",
+                "vcodec": item.get("videoCodec"),
+                "acodec": "acc",
+                "width": item.get("width"),
+                "height": item.get("height"),
+                "fps": item.get("frameRate"),
+                "tbr": item.get("avgBitrate"),
+                "filesize": item.get("fileSize"),
+                "format_note": item.get("qualityLabel"),
+                "protocol": "https",
+                "vbr": item.get("avgBitrate"),
+                "container": "mp4",
+                "url": item.get("url"),
+            }
+
+            if item.get("backupUrl"):
+                fmt["extra_urls"] = item.get("backupUrl")
+
+            ytdlp_formats.append(fmt)
+
+        return ytdlp_formats
+
+    def extract_node(self, node: dict):
+        soundTrack = node["soundTrack"] if node.get(
+            "soundTrack") is not None else None
+        music = ""
+        if soundTrack:
+            audioUrls = soundTrack["audioUrls"]
+            music = (
+                audioUrls[1]["url"]
+                if len(audioUrls) > 1 else audioUrls[0]["url"]
+            )
+
+        stats = {
+            "view_count": node.get("viewCount", 0),
+            "like_count": node.get("likeCount", 0),
+            "comment_count": node.get("commentCount", 0),
+            "share_count": node.get("shareCount", 0),
+        }
+
+        video_id = str(node.get("share_info", "photoId=error")
+                       ).split("photoId=")[1].strip()
+
+        width = node.get("width", 0)
+        height = node.get("height", 0)
+        resolution = "%sx%s" % (width, height)
+        timestamp = int(float(node["timestamp"] / 1000))
+
+        user_id = node.get("userEid", "")
+        original_url = self._LINK_VIDEO_ID % video_id
+        url = "%s?user_id=%s" % (original_url, user_id)
+
+        title = node.get("caption", "")
+        title = title if title != "" else "Video by %s [%s]" % (
+            user_id, video_id)
+        cover = node["coverUrls"][0]["url"] if node.get(
+            "coverUrls") is not None else ""
+
+        url_dl = ""
+        if isinstance(node.get("mainMvUrls"), list) and len(node["mainMvUrls"]) > 0:
+            mainUrls = node["mainMvUrls"]
+            url_dl = str(mainUrls[1]["url"] if len(
+                mainUrls) > 1 else mainUrls[0]["url"])
+
+        both = []
+        if "manifest" in node and isinstance(node["manifest"], dict):
+            try:
+                adaptations = node["manifest"].get("adaptationSet", [])
+                if not isinstance(adaptations, list):
+                    adaptations = []
+                for adaptation in adaptations:
+                    if isinstance(adaptation.get("representation"), list):
+                        representation = adaptation["representation"]
+                        both = self.transform_to_ytdlp_formats(representation)
+                        if not url_dl and len(both) > 0:
+                            url_dl = both[0].get("url")
+                        break
+
+            except Exception as e:
+                self.logger.debug(f"Error parsing manifest: {e}")
+
+        info_dict = {
+            "id": video_id,
+            "display_id": video_id,
+            "title": title,
+            "fulltitle": title,
+            "description": title,
+            "thumbnail": cover,
+            "original_thumbnail": cover,
+            "sd": url_dl,
+            "hd": url_dl,
+            "music": music,
+            "requested_download": [{
+                "title": title,
+                "width": width,
+                "height": height,
+                "resolution": resolution,
+                "url": url,
+                # "video": unescape(video_hd),
+            }],
+            "uploader": "%s - %s" % (user_id, node.get("userName", "no name")),
+            "uploader_id": user_id,
+            "uploader_url": self._LINK_USER_WITH % user_id,
+            "url": url,
+            "original_url": url,
+            "webpage_url": url,
+            "webpage_url_domain": "kuaishou.com",
+            "extractor": "kuaishou",
+            "extractor_key": "Kuaishou",
+            "width": width,
+            "height": height,
+            "resolution": resolution,
+            "duration": int(float(node["duration"] / 1000)) if node.get("duration") is not None else 0,
+            "timestamp": timestamp,
+            "release_timestamp": timestamp,
+            "upload_date": str(self.datetime_timestamp(timestamp)),
+            **stats,
+            "subtitles": [],
+            "audio_only": [],
+            "video_only": [],
+            "both": both,
+            "user_info": {
+                "id": user_id,
+                "name": node.get("userName", user_id),
+                "username": user_id,
+                "kwai_id": node.get("kwaiId", ""),
+                "avatar": node["headUrls"][0]["url"] if node.get("headUrls") is not None else "",
+                "is_verified": node.get("verified", False),
+            }
+        }
+
+        return info_dict
+
 
 class KuaishouExtractor(KuaishouBaseIE):
     USER_PAYLOAD = {
@@ -372,9 +527,39 @@ class KuaishouExtractor(KuaishouBaseIE):
                 node['user_id'] = user_id
                 return self.extract_node_logic(html, node)
             except json.JSONDecodeError:
-                return {"error": "Failed to parse JSON from __APOLLO_STATE__."}
+                self.logger.debug(
+                    "Failed to parse JSON from __APOLLO_STATE__.")
+                return None
 
-        return {"error": "HTML loaded but window.__APOLLO_STATE__ was missing."}
+        self.logger.debug(
+            "HTML loaded but window.__APOLLO_STATE__ was missing.")
+        return None
+
+    def get_video_info_mobile(self, html: str, video_id: str):
+        """Internal handler to find JSON and run your extract_node_logic."""
+        pattern = r'window\.INIT_STATE\s*=\s*(\{.*?\})<\/script>'
+        match = re.search(pattern, html)
+        if match:
+            try:
+                node = json.loads(match.group(1))
+                info = None
+                for k, v in node.items():
+                    if isinstance(v, dict) and "photo" in v \
+                            and isinstance(v['photo'], dict):
+                        info = self.extract_node(v['photo'])
+                        if 'counts' in v and isinstance(v['counts'], dict) \
+                                and 'user_info' in info:
+                            info['user_info'].update(v['counts'])
+                        break
+                return info
+            except json.JSONDecodeError:
+                self.logger.debug(
+                    "Failed to parse JSON from INIT_STATE.")
+                return None
+
+        self.logger.debug(
+            "HTML loaded but window.INIT_STATE was missing.")
+        return None
 
     async def get_redirect_url(self, short_url: str, cookies: Optional[str] = None):
         """
@@ -432,7 +617,7 @@ class KuaishouExtractor(KuaishouBaseIE):
             await asyncio.sleep(random.uniform(1.5, 4.0))
 
         param_user_id = f"?user_id={user_id}" if user_id else ""
-        url = self._LINK_VIDEO_WITH % f"{video_id}{param_user_id}"
+        url = self._LINK_VIDEO_ID % f"{video_id}{param_user_id}"
 
         # Normalize cookies
         cookies = self.parse_cookies(cookie_input) if isinstance(
@@ -483,37 +668,97 @@ class KuaishouExtractor(KuaishouBaseIE):
 
         return {"error": "All retry attempts failed."}
 
+    async def get_initial_data_mobile(
+        self,
+        video_id: str,
+        cookie_input: str | Dict[str, str] | None = None,
+        retries: int = 3,
+        backoff: float = 2.0
+    ):
+        """
+        Fetches the page with retry logic.
+        :param cookie_input: Can be a raw string or a dict.
+        :param retries: Number of attempts before giving up.
+        :param backoff: Initial wait time between retries (multiplies each time).
+        """
+        if self.delay_jitter:
+            # Human-like delay (Jitter) to avoid pattern detection
+            await asyncio.sleep(random.uniform(1.5, 4.0))
+
+        url = self._LINK_VIDEO_ID_MOBILE % video_id
+
+        # Normalize cookies
+        cookies = self.parse_cookies(cookie_input) if isinstance(
+            cookie_input, str) else cookie_input
+
+        if cookies:
+            self.session.cookies.update(cookies)
+            self.base_headers["Cookie"] = "; ".join(
+                [f"{k}={v}" for k, v in cookies.items()])
+
+        for attempt in range(retries):
+            try:
+                self.logger.info(
+                    f"[*] [Attempt {attempt+1}/{retries}] Fetching Kuaishou...")
+
+                resp = await self.request(
+                    url,
+                    headers=self.base_headers,
+                    cookies=cookies,
+                    impersonate="chrome_android",
+                    retries=0
+                )
+                if not resp or not isinstance(resp, Response):
+                    self.logger.error(f"[!] No response from {url}")
+                    continue
+
+                # self.logger.debug(f"[*] Cookies: {resp.cookies}")
+                # self.save_html_text(resp.text)
+                if resp.status_code == 200:
+                    return (video_id, resp.text)
+
+                elif resp.status_code in [403, 429]:
+                    self.logger.error(
+                        f"[!] Rate limited or Blocked (Status {resp.status_code}).")
+                else:
+                    self.logger.error(f"[!] Server Error: {resp.status_code}")
+
+            except (RequestsError, asyncio.TimeoutError) as e:
+                self.logger.error(f"[!] Connection Error: {e}")
+
+            # If we reached here, the attempt failed. Wait before retrying.
+            if attempt < retries - 1:
+                wait_time = backoff * (attempt + 1) + random.uniform(0.5, 1.5)
+                self.logger.debug(
+                    f"[*] Sleeping for {wait_time:.2f}s before retry...")
+                await asyncio.sleep(wait_time)
+
+        return {"error": "All retry attempts failed."}
+
     async def get_video_info_list(
         self, url_list: list[str],
         retries: int = 3,
         backoff: float = 2.0
     ):
-        if self.cookies:
-            cookie_input = self.cookies
-        else:
-            res = await self.request(self._LINK_USER_WITH % "3x36kuaishou")
-            if isinstance(res, Response) and res.status_code == 200:
-                cookie_input = res.cookies.get_dict()
-                self.logger.debug(f"[*] Auto Cookies: {cookie_input}")
-
-        # Use a Semaphore to control how many tasks run at once
+        cookie_input = self.cookies
         semaphore = asyncio.Semaphore(self.concurrent_tasks)
         if len(url_list) > 15:
-            self.delay_jitter = True  # Enable jitter for large batches to avoid detection
+            self.delay_jitter = True
 
         tasks = []
         valid_url_list = []
+
         async with semaphore:
             for url in url_list:
                 if self.cancel:
                     self.on_extracting({"status": "cancelled"})
                     break
 
-                video_id, user_id = self.get_video_id_and_user_id(url)
+                video_id = self.get_video_id(url)
                 valid_url_list.append(url)
                 tasks.append(
-                    self.get_initial_data(
-                        video_id, user_id, cookie_input, retries, backoff)
+                    self.get_initial_data_mobile(
+                        video_id, cookie_input, retries, backoff)
                 )
 
         task_list = await asyncio.gather(*tasks)
@@ -527,8 +772,10 @@ class KuaishouExtractor(KuaishouBaseIE):
                     {"error": task, "url": url, "status": "error"})
                 continue
             try:
-                video_id, user_id, html = task
-                video_info = self.get_video_info(html, video_id, user_id)
+                video_id, html = task
+                video_info = self.get_video_info_mobile(html, video_id)
+                if not video_info:
+                    continue
                 video_info_list.append(video_info)
                 self._on_extracting({
                     "status": "progress",
@@ -666,46 +913,131 @@ class KuaishouExtractor(KuaishouBaseIE):
 
             await asyncio.sleep(random.uniform(1.0, 2.5))
 
-    async def get_live_profile_videos(
+    async def get_video_info_list_from_user(
         self,
         url_uid: str,
-        limit: int = None,
+        limit: Optional[int] = None,
         sort_by="newest",
+        cursor_continue='',
+        cursor_position: int = 0,
+        use_per_next_cursor=False
     ):
-        await asyncio.sleep(0.00005)
+        if not self.cookies:
+            self.logger.error("No cookies found")
+            return
 
+        user_id = self.get_user_id(url_uid)
+        profile_url = self._LINK_USER_WITH % user_id
 
-async def run_multitasking_scout():
-    raw_cookies = "did=web_db214ac2bfa3481494d80da73924f80c"
-    async with KuaishouExtractor() as scout:
-        print("[*] Launching simultaneous scan...")
-        scout.set_test_mode(True)
-        scout.set_cookies(raw_cookies)
+        headers = {
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9,km;q=0.8",
+            "Cache-Control": "no-cache",
+            "Content-Type": "application/json",
+            "Pragma": "no-cache",
+            "profile_referer": profile_url,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Cookie": "",
+            "Referer": profile_url
+        }
 
-        async def do_videos():
-            print("[Videos] Fetching details for a specific video...")
-            result = await scout.get_video_info_list(
-                [
-                    scout._LINK_VIDEO_WITH % "3xspaqvq478ugtw?user_id=3x36h86rp4kvnzs",
-                    scout._LINK_VIDEO_WITH % "3x25by2mwk82ute",
-                ],
-                retries=3
+        if isinstance(self.cookies, str):
+            headers["Cookie"] = self.cookies
+        else:
+            headers["Cookie"] = "; ".join(
+                [f"{k}={v}" for k, v in self.cookies.items()])
+
+        cookies = self.parse_cookies(self.cookies)
+
+        pcursor = cursor_continue if cursor_continue and cursor_continue != '' \
+            else ""
+        pcursor_position = int(cursor_position) if isinstance(cursor_position, int) \
+            else int(0)
+        use_per_next_cursor = sort_by and sort_by == "newest" and use_per_next_cursor
+
+        has_more = True
+        count = 0
+        limit_copy = limit
+        video_list = []
+        video_info_list = []
+        for page in itertools.count(1):
+            if self.cancel:
+                break
+
+            if limit_copy and len(video_info_list) >= limit_copy:
+                break
+
+            if pcursor == 'no_more' or not has_more:
+                break
+
+            body = {
+                "user_id": user_id,
+                "pcursor": pcursor,  # 1.771823624013E12 / no_more
+                "page": "profile"
+            }
+            resp = await self.request(
+                url="https://www.kuaishou.com/rest/v/profile/feed",
+                method="POST",
+                headers=headers,
+                json_data=body,
+                cookies=cookies,
             )
-            scout.logger.info(f"[Videos] Fetched {len(result)} videos.")
-            scout.save_test_data(result)
 
-        async def do_live_scan():
-            print("[Live] Starting live profile scan...")
-            live_results = []
-            async for video in scout.get_public_profile_videos("HBDXMA369", raw_cookies, limit=4):
-                live_results.append(video)
+            if not isinstance(resp, Response):
+                self.logger.debug(f"[*] Response: {resp}")
+                continue
 
-            scout.save_test_data(live_results, suffix="_profile")
+            try:
+                data = resp.json()
+                node_list = data.get('feeds', [])
+                if not node_list:
+                    break
+                for node in node_list:
+                    if "photo" not in node:
+                        continue
+                    info_dict = self.extract_node(node['photo'])
+                    info_dict['cursor'] = pcursor
+                    info_dict['next_cursor'] = pcursor if has_more else ''
+                    info_dict['cursor_position'] = pcursor_position
+                    video_info_list.append(info_dict)
+                    count += 1
 
-        async def do_live_profile_videos_scan():
-            print("[Live] Starting live profile scan...")
+                pcursor = data.get("pcursor", "")
+                has_more = bool(pcursor and pcursor != 'no_more')
+                pcursor_position += 1
+            except Exception as e:
+                self.logger.debug(f"[*] Exception: {e}")
+                continue
 
-            url_uid = 'https://www.kuaishou.com/profile/3xee4ritq5k6t2k'
-            result = await scout.get_live_profile_videos(url_uid, )
+        return video_info_list
 
-        await asyncio.gather(do_videos())
+    async def test_get_video_info_list_from_user(self):
+        self._skip_cached_info = True
+        url = self._LINK_USER_WITH % '3x36h86rp4kvnzs'
+        self.logger.debug(f"Video URL: {url}")
+
+        info_list = await self.get_video_info_list_from_user(url, limit=10, use_per_next_cursor=False)
+        if info_list:
+            # previous_data = self.load_test_data('_user')
+            # if previous_data:
+            #     info_list = previous_data + info_list
+            self.logger.debug(f"Total videos: {len(info_list)} video")
+            self.save_test_data(info_list, '_user')
+        return info_list
+
+    async def test_get_video_info_list(self):
+        self._skip_cached_info = True
+        url = self._LINK_VIDEO_ID % "3x6r4kmmmjiv2ws"
+        url, _video_id = self.get_url_video_id(url)
+        self.logger.debug(f"Video URL: {url}, {_video_id}")
+        url_list = [
+            url,
+            self._LINK_VIDEO_ID % "3x25by2mwk82ute",
+        ]
+        info_list = await self.get_video_info_list(url_list)
+        # info_list = self.load_test_data()
+        if info_list:
+            self.save_test_data(info_list)
+        return info_list

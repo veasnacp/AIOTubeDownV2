@@ -359,6 +359,17 @@ class ExtractorBase(AsyncBaseRequest):
     def save_html_text(self, text: str, suffix: str = ""):
         self.save_error_text(text, ext="html", suffix=suffix)
 
+    def load_text_data(self, suffix: str = "", ext="html"):
+        try:
+            if self._IS_TESTING:
+                folder = current_dir / '_data'
+                with open(folder / f"__{self._CLOUD_FOLDER.split('/')[-1]}{suffix}.{ext}", "r", encoding="utf-8", errors="strict") as in_f:
+                    return in_f.read()
+        except Exception as e:
+            self.logger.error(
+                f"[!] ❌ Failed to load html text from local file: {e}")
+            return None
+
     async def get_drama_info_from_cloudinary(self, video_id: str):
         try:
             result = self.cloud_manager.retrieve_data(
