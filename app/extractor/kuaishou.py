@@ -967,7 +967,7 @@ class KuaishouExtractor(KuaishouBaseIE):
         use_per_next_cursor=False
     ):
         if not self.cookies:
-            self.logger.error("No cookies found")
+            self.logger.error("[!] ❌ No cookies found")
             return
 
         user_id = self.get_user_id(url_uid)
@@ -1042,6 +1042,8 @@ class KuaishouExtractor(KuaishouBaseIE):
 
                 next_pcursor = data.get("pcursor", "")
                 has_more = bool(next_pcursor and next_pcursor != 'no_more')
+                self.logger.debug(
+                    f"[*] Current pcursor: {pcursor}, Next pcursor: {next_pcursor}")
                 for node in node_list:
                     if "photo" not in node:
                         continue
@@ -1057,6 +1059,9 @@ class KuaishouExtractor(KuaishouBaseIE):
                     info_dict['cursor_position'] = pcursor_position
                     video_info_list.append(info_dict)
                     count += 1
+
+                if not isinstance(limit_copy, int) and use_per_next_cursor:
+                    break
 
                 pcursor = next_pcursor
                 pcursor_position += 1

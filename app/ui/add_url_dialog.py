@@ -12,12 +12,11 @@ from PySide6Addons import (
     SubtitleLabel,
 )
 
-from ..components.override import (
-    CardWidget, MessageBoxBase, NumberInput, TransparentToolButton,
-    SelectComboBox as ComboBox,
-    TextAreaInput as TextEdit,
-    TextInput as LineEdit
-)
+from ..components.override import CardWidget, MessageBoxBase, NumberInput
+from ..components.override import SelectComboBox as ComboBox
+from ..components.override import TextAreaInput as TextEdit
+from ..components.override import TextInput as LineEdit
+from ..components.override import TransparentToolButton
 from ..config.constants import APP_NAME, DIRS
 from ..theme import Colors
 from ..utils.validation import is_valid_url
@@ -125,10 +124,11 @@ class AddUrlDialog(MessageBoxBase):
         self.res_combo.setFixedWidth(130)
 
         self.provider_combo = ComboBox(self)
-        self.provider_combo.addItems(["Default", "Youtube", "Direct"])
+        self.provider_combo.addItems(["Default", "Direct"])
         self.provider_combo.setFixedWidth(100)
 
-        self.download_btn = PrimaryPushButton("Download", self)
+        self.download_btn = PrimaryPushButton(
+            FluentIcon.DOWNLOAD, "Download", self)
         self.download_btn.clicked.connect(self.accept)
 
         self.bottom_layout.addWidget(self.count_spin)
@@ -150,14 +150,23 @@ class AddUrlDialog(MessageBoxBase):
         self.viewLayout.setSpacing(10)
         self.viewLayout.setContentsMargins(10, 10, 10, 10)
 
-        self.widget.resize(self.window().width() - 100, 600)
-        self.widget.setMinimumWidth(600)
+        self._update_stats()
+        window_width = self.window().width()
+        if window_width < 1000:
+            self.widget.setMinimumSize(QSize(600, 460))
+        else:
+            self.widget.setMinimumSize(QSize(window_width - 400, 500))
 
     def _update_stats(self):
         valid_urls, invalid_urls = self.get_urls()
         self.total_label.setText(
             f"Total links: {len([*valid_urls, *invalid_urls])}")
         self.invalid_label.setText(f"Invalid: {len(invalid_urls)}")
+
+        if len(valid_urls) > 0:
+            self.download_btn.setEnabled(True)
+        else:
+            self.download_btn.setEnabled(False)
 
     def _browse_folder(self):
         folder = QFileDialog.getExistingDirectory(

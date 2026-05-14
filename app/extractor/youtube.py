@@ -87,17 +87,21 @@ class YouTubeBaseIE(ExtractorBase):
         url = watch_link % self.get_video_id(video_url)
         return url
 
-    def get_channel_url(self, url_username_id: str):
+    def get_channel_url_username(self, url_username_id: str):
         url = url_username_id.strip()
+        username = ""
         if "/channel/" in url:
-            user_id = url.split('/channel/')[1].split("?")[0].split("/")[0]
-            channel_url = self._LINK_CHANNEL % user_id
+            username = url.split('/channel/')[1].split("?")[0].split("/")[0]
+            channel_url = self._LINK_CHANNEL % username
         elif "@" in url:
             username = url.split('@')[1].split("?")[0].split("/")[0]
             channel_url = self._LINK_USERNAME % username
         else:
             channel_url = url
-        return channel_url
+        return channel_url, username
+
+    def get_channel_url(self, url: str):
+        return self.get_channel_url_username(url)[1]
 
     def get_playlist_id(self, url_playlist_id: str):
         url = url_playlist_id.strip()
@@ -801,7 +805,7 @@ class YouTubeExtractor(YouTubeBaseIE):
         self,
         channel_url: str,
         content_type: YouTubeSortBy.VideoType = "videos",
-        limit: int = 5,
+        limit: Optional[int] = None,
         sort_by: YouTubeSortBy.ChannelVideos = "newest",
         use_per_next_cursor: bool = False,
         next_data: Optional[dict] = None,

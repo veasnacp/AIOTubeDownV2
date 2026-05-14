@@ -140,12 +140,6 @@ class MainWindow(MSFluentWindow):
 
         self.titleBarHLayout = self.titleBar.hBoxLayout
 
-        self.setStyleSheet(
-            f'''
-            {self.styleSheet()}
-            MainWindow {{ font: 14 'Kantumruy Pro', 'Segoe UI', 'Microsoft YaHei', 'PingFang SC'; }}
-            '''
-        )
         self.setMicaEffectEnabled(False)
         self.set_theme('dark')
 

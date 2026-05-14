@@ -100,10 +100,6 @@ class DownloadWorker(QRunnable):
         self.signals = WorkerSignals()
         self._is_paused = False
         self._is_cancelled = False
-        self._is_video = "youtube.com" in str(
-            url) or "youtu.be" in str(url) or "vimeo.com" in str(url)
-        self._is_douyin = "douyin.com" in str(
-            url) or "iesdouyin.com" in str(url)
         self.chunk_size = 10485760
 
     @Slot()
@@ -112,118 +108,8 @@ class DownloadWorker(QRunnable):
 
         if self.info:
             self.run_yt_dlp()
-        elif self._is_douyin:
-            self.run_douyin()
         else:
             self.run_yt_dlp()
-
-    def run_douyin(self):
-        self.signals.status_changed.emit(self.task_id, "Extracting...")
-        try:
-            async def get_info():
-                async with AsyncDouyinExtractor() as extractor:
-                    return await extractor.get_video_detail(self.url)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            info = loop.run_until_complete(get_info())
-            loop.close()
-
-            if info and ("hd" in info or "sd" in info):
-                self.signals.status_changed.emit(
-                    self.task_id, "Downloading...")
-                # Use HD link from extractor
-                direct_link = info.get("hd") or info.get("sd")
-                self.filename = info.get("title", self.filename)
-                self.signals.filename_updated.emit(self.task_id, self.filename)
-
-                # Pass direct link to yt-dlp
-                self.run_yt_dlp(override_url=direct_link,
-                                filename=self.filename)
-            else:
-                error_msg = info.get(
-                    "error", "No HD link found") if info else "Extraction failed"
-                self.signals.error.emit(
-                    self.task_id, f"Douyin Error: {error_msg}")
-        except Exception as e:
-            logger.error(f"Douyin Extraction failed: {e}")
-            self.signals.error.emit(
-                self.task_id, f"Douyin Extract Failed: {str(e)}")
-        # if self._is_video:
-        #     self.run_yt_dlp()
-        # else:
-        #     self.run_http()
-
-    def run_http(self):
-        full_path = os.path.join(self.output_dir, self.filename)
-        try:
-            start_time = time.time()
-            downloaded = 0
-            r = requests.get(self.url, stream=True, impersonate="chrome120")
-            r.raise_for_status()
-            total_length = int(r.headers.get('content-length', 0))
-
-            with open(full_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if self._is_cancelled:
-                        break
-                    if self._is_paused:
-                        while self._is_paused:
-                            time.sleep(0.5)
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        elapsed = time.time() - start_time
-                        speed_val = downloaded / elapsed if elapsed > 0 else 0
-                        speed_str = self.format_speed(speed_val)
-                        eta_val = (total_length - downloaded) / \
-                            speed_val if speed_val > 0 else 1
-                        eta_str = self.format_eta(eta_val)
-                        self.signals.progress.emit(
-                            self.task_id, downloaded, total_length, speed_str, eta_str)
-
-            if self._is_cancelled:
-                self.signals.status_changed.emit(self.task_id, "Cancelled")
-                if os.path.exists(full_path):
-                    os.remove(full_path)
-            else:
-                self.signals.finished.emit(self.task_id, full_path)
-                self.signals.status_changed.emit(self.task_id, "Completed")
-        except Exception as e:
-            logger.error(f"HTTP Download failed: {e}")
-            self.signals.error.emit(self.task_id, str(e))
-
-    def run_youtube(self):
-        try:
-            async def get_info():
-                async with YouTubeExtractor() as extractor:
-                    return await extractor.get_video_info_list(self.url)
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            info = loop.run_until_complete(get_info())
-            loop.close()
-
-            if info and ("hd" in info or "sd" in info):
-                self.signals.status_changed.emit(
-                    self.task_id, "Downloading...")
-                # Use HD link from extractor
-                direct_link = info.get("hd") or info.get("sd")
-                self.filename = info.get("title", self.filename)
-                self.signals.filename_updated.emit(self.task_id, self.filename)
-
-                # Pass direct link to yt-dlp
-                self.run_yt_dlp(override_url=direct_link,
-                                filename=self.filename)
-            else:
-                error_msg = info.get(
-                    "error", "No HD link found") if info else "Extraction failed"
-                self.signals.error.emit(
-                    self.task_id, f"YouTube Error: {error_msg}")
-        except Exception as e:
-            logger.error(f"YouTube Extraction failed: {e}")
-            self.signals.error.emit(
-                self.task_id, f"YouTube Extract Failed: {str(e)}")
 
     def run_yt_dlp(self, override_url=None, filename=None):
         target_url = override_url or self.url

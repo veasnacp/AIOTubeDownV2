@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import re
 import urllib.request
 from pathlib import Path
@@ -22,6 +23,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -46,13 +48,16 @@ from PySide6Addons import (
     TabBar,
     TabCloseButtonDisplayMode,
     TogglePushButton,
+    isDarkTheme,
     setFont,
 )
+from PySide6Addons.multimedia import VideoWidget
 
 from ..components.icons import FileIcon
-from ..components.override import CardWidget, CheckableMenu, TransparentDropDownToolButton, TransparentToolButton
+from ..components.override import CardWidget, CheckableMenu
 from ..components.override import TextAreaInput as TextEdit
 from ..components.override import TextInput as LineEdit
+from ..components.override import TransparentDropDownToolButton, TransparentToolButton
 from ..core._worker import DefaultWorker
 from ..extractor.drama import (
     DramaBiteExtractor,
@@ -64,13 +69,19 @@ from ..extractor.drama import (
     ShortMovsExtractor,
     StardustTvExtractor,
 )
+from ..extractor.extends_drama import (
+    KuaishouExtractor,
+    TikTokExtractor,
+    YouTubeExtractor,
+)
 from ..theme import Colors, DarkMode, LightMode
 
 TYPE_DRAMA_EXTRACTOR: TypeAlias = Optional[Union[
     'DramaExtractorBase',
     'DramaBiteExtractor', 'DramaBoxExtractor',
     'ReelShortExtractor', 'RushShortsTvExtractor',
-    'ShortMovsExtractor', 'StardustTvExtractor'
+    'ShortMovsExtractor', 'StardustTvExtractor',
+    'KuaishouExtractor', 'TikTokExtractor', 'YouTubeExtractor'
 ]]
 
 
@@ -81,6 +92,9 @@ REGEX_DRAMA = [
     (RushShortsTvExtractor._BASE_URL, RushShortsTvExtractor),
     (ShortMovsExtractor._BASE_URL, ShortMovsExtractor),
     (StardustTvExtractor._BASE_URL, StardustTvExtractor),
+    (KuaishouExtractor._BASE_URL, KuaishouExtractor),
+    (TikTokExtractor._BASE_URL, TikTokExtractor),
+    (YouTubeExtractor._BASE_URL, YouTubeExtractor),
 ]
 
 DRAMA_ICONS = {
@@ -91,6 +105,9 @@ DRAMA_ICONS = {
     "shortmovs_downloader": FileIcon.SHORTMOVS_LOGO,
     "rushshortstv_downloader": FileIcon.RUSHSHORTSTV_LOGO,
     "stardusttv_downloader": FileIcon.STARDUSTTV_LOGO,
+    "kuaishou_downloader": FileIcon.KUAISHOU_LOGO,
+    "tiktok_downloader": FileIcon.TIKTOK_LOGO,
+    "youtube_downloader": FileIcon.YOUTUBE_LOGO
 }
 
 CACHE_DRAMA = {}
@@ -142,7 +159,10 @@ class ScrapeWorker(QRunnable):
             # Reset session for the current thread's event loop to prevent "loop closed" errors
             try:
                 if hasattr(self.extractor, 'session') and self.extractor.session:
-                    await self.extractor.session.close()
+                    try:
+                        await self.extractor.session.close()
+                    except Exception:
+                        pass
                     try:
                         await self.extractor.session_sync.close()
                     except Exception:
@@ -163,11 +183,17 @@ class ScrapeWorker(QRunnable):
 
             self.extractor.set_test_mode(True)
             # info = await self.extractor.test_get_drama_info(self.url)
-            info = self.extractor.load_test_data()
+            info = self.extractor.load_test_data('_drama')
             if not info:
-                info = await self.extractor.get_drama_info(self.url)
+                if hasattr(self.extractor, 'get_profile_info'):
+                    info = await self.extractor.get_profile_info(
+                        self.url,
+                        use_per_next_cursor=True
+                    )
+                else:
+                    info = await self.extractor.get_drama_info(self.url)
                 if info:
-                    self.extractor.save_test_data(info)
+                    self.extractor.save_test_data(info, '_drama')
             return info
 
         try:
@@ -194,7 +220,7 @@ class DownloadSignals(QObject):
     progress = Signal(dict)
 
 
-class DownloadWorker(QRunnable):
+class DramaDownloadWorker(QRunnable):
     """Worker task to run async YoutubeDL in the background"""
 
     def __init__(self, extractor: TYPE_DRAMA_EXTRACTOR, info, output_dir):
@@ -307,6 +333,10 @@ class ImageLoaderLabel(QLabel):
         self.placeholder_path = "path/to/your/placeholder.png"
         self.radius = 12
         self.setAlignment(Qt.AlignCenter)
+        self._cache = {}  # url -> QPixmap
+
+    def hash_url(self, url: str):
+        return hashlib.md5(url.encode()).hexdigest()
 
     def loadImage(self, url_str: str):
         """Dispatches a background worker to load the image"""
@@ -314,10 +344,18 @@ class ImageLoaderLabel(QLabel):
             self._set_placeholder()
             return
 
-        task = ImageLoadTask(url_str)
-        task.signals.result.connect(self._on_image_loaded)
-        task.signals.error.connect(self._on_load_error)
-        QThreadPool.globalInstance().start(task)
+        if self.hash_url(url_str) in self._cache:
+            pixmap = self._cache[self.hash_url(url_str)]
+            if self.hasScaledContents():
+                pixmap = pixmap.scaled(
+                    self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.setPixmap(pixmap)
+            return
+
+        self.task = ImageLoadTask(url_str)
+        self.task.signals.result.connect(self._on_image_loaded)
+        self.task.signals.error.connect(self._on_load_error)
+        QThreadPool.globalInstance().start(self.task)
 
     def _on_image_loaded(self, image: QImage):
         """Runs in main thread: converts QImage to QPixmap and displays it"""
@@ -328,7 +366,10 @@ class ImageLoaderLabel(QLabel):
                 pixmap = pixmap.scaled(
                     self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
-            self.setPixmap(self._get_rounded_pixmap(pixmap, self.radius))
+            rounded_pixmap = self._get_rounded_pixmap(pixmap, self.radius)
+            self.setPixmap(rounded_pixmap)
+            self._cache[self.hash_url(self.task.url)] = rounded_pixmap
+
         else:
             self._set_placeholder()
 
@@ -412,6 +453,58 @@ class EpisodeButton(TogglePushButton):
         else:
             self.setText(str(num))
 
+    def setStyleSheet(self, styleSheet: str, /) -> None:
+        styleSheet = f"""
+        {styleSheet}
+        PushButton, PushButton[hasIcon=false], PushButton[hasIcon=true] {{padding: 0px;}}
+        """
+        return super().setStyleSheet(styleSheet)
+
+
+class DramaVideoPlayerDialog(QDialog):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.vBoxLayout = QVBoxLayout(self)
+        self.videoWidget = VideoWidget(self)
+
+        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.vBoxLayout.addWidget(self.videoWidget)
+        self.setMinimumWidth(450)
+        self.videoWidget.setMinimumWidth(450)
+
+        self.setStyleSheet(f"""
+        QDialog {{
+            border-radius: 12px;
+            background-color: {DarkMode.card if isDarkTheme() else LightMode.card};
+        }}
+        """)
+
+    def resizePortrait(self):
+        self.resize(450, 800)
+        self.videoWidget.resize(450, 800)
+
+    def resizeLandscape(self):
+        self.resize(800, 450)
+        self.videoWidget.resize(800, 450)
+
+    def setVideo(self, video_url: str):
+        basename = urlparse(video_url).path.split("/")[-1]
+        self.setWindowTitle(basename)
+        self.videoWidget.setVideo(QUrl(video_url))
+
+    def play(self):
+        self.videoWidget.play()
+
+    def pause(self):
+        self.videoWidget.pause()
+
+    def stop(self):
+        self.videoWidget.stop()
+
+    def isPlaying(self):
+        return self.videoWidget.player.isPlaying()
+
 
 class DramaSidebar(ScrollArea):
     """Left sidebar for selected drama details"""
@@ -434,8 +527,16 @@ class DramaSidebar(ScrollArea):
             f"border-radius: 12px; background-color: {Colors.alpha(Colors.gray_6, 0.4)}; font-size: 20px; font-weight: bold; color: gray; border: 2px solid {LightMode.primary};")
         self.vBoxlayout.addWidget(self.poster, 0, Qt.AlignCenter)
 
+        self.play_btn = PrimaryPushButton("Play", self)
+        self.play_btn.hide()
+        self.vBoxlayout.addWidget(self.play_btn)
+
         # Drama Info
-        self.title = SubtitleLabel("Drama Title", self)
+        self.title = BodyLabel("Drama Title", self)
+        font = self.title.font()
+        font.setBold(True)
+        font.setPointSize(10)
+        self.title.setFont(font)
         self.title.setAlignment(Qt.AlignCenter)
         self.title.setWordWrap(True)
         self.vBoxlayout.addWidget(self.title)
@@ -451,6 +552,7 @@ class DramaSidebar(ScrollArea):
         self.vBoxlayout.addLayout(stats_layout, 1)
 
         self.info: dict = {}
+        self.current_selected_chapter: Optional[dict] = None
         self.extractor: TYPE_DRAMA_EXTRACTOR = DramaExtractorBase()
         self.extractor._CLOUD_FOLDER = ''
         self.output_dir = self.extractor.get_output_dir()
@@ -474,12 +576,14 @@ class DramaSidebar(ScrollArea):
         self.path_layout.addWidget(self.browse_btn)
         self.vBoxlayout.addLayout(self.path_layout)
 
+        self.btn_action_layout = QHBoxLayout()
         self.download_btn = PrimaryPushButton(
             FluentIcon.DOWNLOAD, "Download Selected", self)
-        self.vBoxlayout.addWidget(self.download_btn)
-
         self.cancel_btn = PushButton("Cancel", self)
-        self.vBoxlayout.addWidget(self.cancel_btn)
+
+        self.btn_action_layout.addWidget(self.cancel_btn)
+        self.btn_action_layout.addWidget(self.download_btn)
+        self.vBoxlayout.addLayout(self.btn_action_layout)
 
         self.setWidget(self.view)
         self.enableTransparentBackground()
@@ -487,8 +591,15 @@ class DramaSidebar(ScrollArea):
         # show scroll bar on hover
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+        self.play_btn.clicked.connect(self.play_video)
         self.download_btn.clicked.connect(self.download_selected)
         self.cancel_btn.clicked.connect(self.cancel_all)
+
+    def show_play_btn(self):
+        if hasattr(self.extractor, '_EXTENDS_NAME'):
+            self.play_btn.show()
+        else:
+            self.play_btn.hide()
 
     def browse_path(self):
         path = QFileDialog.getExistingDirectory(self, "Select Directory")
@@ -498,6 +609,30 @@ class DramaSidebar(ScrollArea):
 
     def path_changed(self, text):
         self.path_edit.setToolTip(text)
+
+    def play_video(self):
+        dialog = DramaVideoPlayerDialog(self.window())
+        if not self.current_selected_chapter:
+            return
+
+        video_url = self.extractor.get_video_url_play(
+            self.current_selected_chapter)
+        if not video_url:
+            logger.warning("Video URL not found")
+            return
+
+        if 'width' in self.current_selected_chapter and 'height' in self.current_selected_chapter:
+            width = self.current_selected_chapter['width']
+            height = self.current_selected_chapter['height']
+            if width < height:
+                dialog.resizePortrait()
+            else:
+                dialog.resizeLandscape()
+        else:
+            dialog.resizePortrait()
+        dialog.setVideo(video_url)
+        dialog.play()
+        dialog.show()
 
     def download_selected(self):
         if self.selected_count.text() == "0\nSelected" or not self.extractor:
@@ -576,7 +711,7 @@ class DramaSidebar(ScrollArea):
         logger.info(
             f"Downloading {len(selected_chapters)} selected episodes...")
 
-        worker = DownloadWorker(
+        worker = DramaDownloadWorker(
             self.extractor,
             download_info,
             self.output_dir,
@@ -612,7 +747,7 @@ class DramaSidebar(ScrollArea):
             info = data['info']
             self.info.update(info)
             info_key = self.info.get('info_key', '')
-            print('info_key:', info_key)
+
             if info_key:
                 CACHE_DRAMA[info_key] = self.info
         if worker and worker in self.download_workers:
@@ -892,6 +1027,32 @@ class DramaDownloader(QWidget):
             self, 'ep_buttons', []) if b.isChecked())
         self.sidebar.selected_count.setText(f"{selected}\nSelected")
 
+        if not self.sidebar.info.get('chapterList'):
+            return
+
+        if not hasattr(self.sidebar.extractor, '_EXTENDS_NAME'):
+            return
+
+        info = self.sidebar.info
+        if selected > 0:
+            self.sidebar.show_play_btn()
+            for i, btn in enumerate(self.ep_buttons):
+                if btn.isChecked():
+                    if i < len(info.get('chapterList', [])):
+                        self.sidebar.title.setText(
+                            f"Download {info['chapterList'][i].get('title')}")
+                        self.sidebar.current_selected_chapter = info['chapterList'][i]
+                    break
+            self.sidebar.poster.loadImage(
+                self.sidebar.current_selected_chapter.get('thumbnail', ''))
+        else:
+            self.sidebar.play_btn.hide()
+            self.sidebar.current_selected_chapter = None
+            _prev_title = self.sidebar.title.text()
+            self.sidebar.title.setText(info.get('drama_title') or _prev_title)
+            self.sidebar.poster.loadImage(
+                self.sidebar.extractor.get_cover_url(info))
+
     def scrape_episode(self):
         url = self.url_edit.text()
         self._get_drama_info(url)
@@ -928,8 +1089,8 @@ class DramaDownloader(QWidget):
                 CACHE_DRAMA[build_id_key] = extractor._BUILD_ID
             else:
                 extractor._BUILD_ID = build_id
+            self.logger.debug(f"build_id: {extractor._BUILD_ID}")
 
-        # print("build_id: ", extractor._BUILD_ID)
         if hasattr(extractor, 'get_drama_id_slug_title'):
             _, drama_id = extractor.get_drama_id_slug_title(url)
             drama_id = drama_id.split('/')[0]
@@ -1062,6 +1223,9 @@ class DramaDownloaderPage(ScrollArea):
         self.shortmovs_downloader: Optional['DramaDownloader'] = None
         self.rushshortstv_downloader: Optional['DramaDownloader'] = None
         self.stardusttv_downloader: Optional['DramaDownloader'] = None
+        self.kuaishou_downloader: Optional['DramaDownloader'] = None
+        self.tiktok_downloader: Optional['DramaDownloader'] = None
+        self.youtube_downloader: Optional['DramaDownloader'] = None
 
         self.dramaboxAction = Action(
             DRAMA_ICONS['dramabox_downloader'], self.tr('Dramabox'), checkable=True)
@@ -1075,10 +1239,17 @@ class DramaDownloaderPage(ScrollArea):
             DRAMA_ICONS['rushshortstv_downloader'], self.tr('Rushshortstv'), checkable=True)
         self.stardusttvAction = Action(
             DRAMA_ICONS['stardusttv_downloader'], self.tr('Stardusttv'), checkable=True)
+        self.kuaishouAction = Action(
+            DRAMA_ICONS['kuaishou_downloader'], self.tr('Kuaishou'), checkable=True)
+        self.tiktokAction = Action(
+            DRAMA_ICONS['tiktok_downloader'], self.tr('Tiktok'), checkable=True)
+        self.youtubeAction = Action(
+            DRAMA_ICONS['youtube_downloader'], self.tr('Youtube'), checkable=True)
 
         self.object_name_list = ["dramabox_downloader", "reelshort_downloader",
                                  "dramabite_downloader", "shortmovs_downloader",
-                                 "rushshortstv_downloader", "stardusttv_downloader"]
+                                 "rushshortstv_downloader", "stardusttv_downloader",
+                                 "kuaishou_downloader", "tiktok_downloader", "youtube_downloader"]
         self.object_name_dict = {
             "dramabox_downloader": (self.dramabox_downloader, DramaDownloader, self.dramaboxAction),
             "reelshort_downloader": (self.reelshort_downloader, DramaDownloader, self.reelshortAction),
@@ -1086,6 +1257,9 @@ class DramaDownloaderPage(ScrollArea):
             "shortmovs_downloader": (self.shortmovs_downloader, DramaDownloader, self.shortmovsAction),
             "rushshortstv_downloader": (self.rushshortstv_downloader, DramaDownloader, self.rushshortstvAction),
             "stardusttv_downloader": (self.stardusttv_downloader, DramaDownloader, self.stardusttvAction),
+            "kuaishou_downloader": (self.kuaishou_downloader, DramaDownloader, self.kuaishouAction),
+            "tiktok_downloader": (self.tiktok_downloader, DramaDownloader, self.tiktokAction),
+            "youtube_downloader": (self.youtube_downloader, DramaDownloader, self.youtubeAction),
         }
 
         self.dramaboxAction.toggled.connect(
@@ -1100,6 +1274,12 @@ class DramaDownloaderPage(ScrollArea):
             lambda checked: self.on_toggle_add_tab(checked, "rushshortstv_downloader"))
         self.stardusttvAction.toggled.connect(
             lambda checked: self.on_toggle_add_tab(checked, "stardusttv_downloader"))
+        self.kuaishouAction.toggled.connect(
+            lambda checked: self.on_toggle_add_tab(checked, "kuaishou_downloader"))
+        self.tiktokAction.toggled.connect(
+            lambda checked: self.on_toggle_add_tab(checked, "tiktok_downloader"))
+        self.youtubeAction.toggled.connect(
+            lambda checked: self.on_toggle_add_tab(checked, "youtube_downloader"))
 
         class AddDropDownButton(TransparentDropDownToolButton):
             def setStyleSheet(self, styleSheet: str, /) -> None:
@@ -1184,6 +1364,13 @@ class DramaDownloaderPage(ScrollArea):
             self.shortmovsAction,
             self.rushshortstvAction,
             self.stardusttvAction
+        ])
+
+        menu.addSeparator()
+        menu.addActions([
+            self.youtubeAction,
+            self.tiktokAction,
+            self.kuaishouAction,
         ])
 
         if pos is not None:

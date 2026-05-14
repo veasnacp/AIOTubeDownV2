@@ -675,12 +675,12 @@ class TikTokExtractor(TikTokBaseIE):
         cursor_position: int = 0,
         use_per_next_cursor=False
     ):
-        global cursor, hasMore
+        global cursor, has_more
         cursor = cursor_continue if cursor_continue and cursor_continue != '' \
             else str(int(time.time() * 1E3))
         cursor_position = int(cursor_position) if isinstance(cursor_position, int) \
             else int(0)
-        hasMore = False
+        has_more = False
 
         use_per_next_cursor = sort_by and sort_by == "newest" and use_per_next_cursor
 
@@ -697,6 +697,10 @@ class TikTokExtractor(TikTokBaseIE):
         for page in itertools.count(1):
             if self.cancel:
                 break
+
+            if limit_copy and len(video_info_list) >= limit_copy:
+                break
+
             url = self._API_CREATOR_ITEM_LIST
             params = self._build_web_query(sec_uid, cursor)
             self.logger.debug(f"[cursor]: {cursor}")
@@ -723,19 +727,21 @@ class TikTokExtractor(TikTokBaseIE):
 
                 self.save_html_text(r.text, "_user")
                 data = json.loads(r.text)
-                hasMore = data['hasMorePrevious']
-                current_cursor = cursor
-                if hasMore:
+                has_more = data['hasMorePrevious']
+                prev_cursor = cursor
+                if has_more:
                     last_data = data['itemList'][-1]
-                    cursor = str(int(last_data.get('createTime') * 1E3))
+                    next_cursor = str(int(last_data.get('createTime') * 1E3))
                 else:
-                    cursor = ''
+                    next_cursor = ''
+
+                self.logger.debug(f"[next_cursor]: {next_cursor}")
 
                 for info in data['itemList']:
                     count += 1
                     video_info = self.extract_node(info)
-                    video_info['cursor'] = current_cursor
-                    video_info['next_cursor'] = cursor if hasMore else ''
+                    video_info['cursor'] = prev_cursor
+                    video_info['next_cursor'] = next_cursor if has_more else ''
                     video_info['cursor_position'] = cursor_position
 
                     video_link = video_info.get("original_url")
@@ -747,17 +753,17 @@ class TikTokExtractor(TikTokBaseIE):
                         "data": video_info
                     })
 
-                    if sort_by and sort_by != "newest":
-                        limit_copy = None
-                    if not use_per_next_cursor and count == limit_copy:
-                        hasMore = False
-                        break
+                    # if sort_by and sort_by != "newest":
+                    #     limit_copy = None
+                    # if not use_per_next_cursor and count == limit_copy:
+                    #     has_more = False
+                    #     break
 
-                if use_per_next_cursor:
+                if not isinstance(limit_copy, int) and use_per_next_cursor:
                     break
+
+                cursor = next_cursor
                 cursor_position += 1
-                if not hasMore or count == limit_copy:
-                    break
             except ValueError as err:
                 self.logger.debug(f"extract_info_profile error: {err}")
                 raise Exception(err, url_uid)

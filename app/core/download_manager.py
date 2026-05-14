@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,7 @@ class DownloadManager(QObject):
         self.thread_pool.setMaxThreadCount(3)
         self.active_workers = {}  # task_id -> DownloadWorker
         self.last_db_update = {}  # task_id -> last_timestamp
+        self.is_enable_db = True
 
     def add_task(self, url, filename, output_dir, category="Other", info: Optional[dict] = None, options=None):
         # 1. Add to Database
@@ -35,8 +37,11 @@ class DownloadManager(QObject):
         if info:
             url = info.get('url')
             filename = info.get('title')
-        task_id = db.add_task(url, filename, output_dir,
-                              category, metadata_json=metadata_json)
+        if self.is_enable_db:
+            task_id = db.add_task(url, filename, output_dir,
+                                  category, metadata_json=metadata_json)
+        else:
+            task_id = str(uuid.uuid4())
 
         # 2. Create Worker
         worker = DownloadWorker(task_id, url, output_dir,
@@ -61,6 +66,8 @@ class DownloadManager(QObject):
     def on_worker_progress(self, task_id, downloaded, total, speed, eta):
         self.task_progress.emit(task_id, downloaded, total, speed, eta)
 
+        if not self.is_enable_db:
+            return
         # Periodic database update (throttled every 2 seconds)
         now = time.time()
         last = self.last_db_update.get(task_id, 0)
@@ -72,26 +79,30 @@ class DownloadManager(QObject):
     @Slot(int, str)
     def on_worker_status(self, task_id, status):
         self.task_status.emit(task_id, status)
-        db.update_task(task_id, status=status)
+        if self.is_enable_db:
+            db.update_task(task_id, status=status)
 
     @Slot(int, str)
     def on_worker_finished(self, task_id, filepath):
         filepath = Path(filepath)
         self.task_finished.emit(task_id, str(filepath))
-        db.update_task(
-            task_id,
-            filename=filepath.name,
-            save_path=str(filepath.parent),
-            status="Completed",
-            date_completed=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
+        if self.is_enable_db:
+            db.update_task(
+                task_id,
+                filename=filepath.name,
+                save_path=str(filepath.parent),
+                status="Completed",
+                date_completed=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
         if task_id in self.active_workers:
             del self.active_workers[task_id]
 
     @Slot(int, str)
     def on_worker_error(self, task_id, error_msg, url):
         self.task_error.emit(task_id, error_msg)
-        db.update_task(task_id, url=url, status="Error", error_msg=error_msg)
+        if self.is_enable_db:
+            db.update_task(task_id, url=url, status="Error",
+                           error_msg=error_msg)
         if task_id in self.active_workers:
             del self.active_workers[task_id]
 
@@ -100,13 +111,15 @@ class DownloadManager(QObject):
         logger.debug(
             f'on_worker_filename_updated {task_id} {real_filename}')
         self.task_filename_updated.emit(task_id, real_filename)
-        db.update_task(task_id, filename=real_filename)
+        if self.is_enable_db:
+            db.update_task(task_id, filename=real_filename)
 
     def stop_task(self, task_id):
         if task_id in self.active_workers:
             self.active_workers[task_id].cancel()
             del self.active_workers[task_id]
-            db.update_task(task_id, status="Stopped")
+            if self.is_enable_db:
+                db.update_task(task_id, status="Stopped")
 
     def stop_all(self):
         for task_id in list(self.active_workers.keys()):
@@ -114,7 +127,8 @@ class DownloadManager(QObject):
 
     def remove_task(self, task_id):
         self.stop_task(task_id)
-        db.remove_task(task_id)
+        if self.is_enable_db:
+            db.remove_task(task_id)
 
     def resume_task(self, task_id):
         if task_id in self.active_workers:
@@ -144,7 +158,8 @@ class DownloadManager(QObject):
 
     def redownload_task(self, task_id):
         self.stop_task(task_id)
-        db.update_task(task_id, size_downloaded=0, status="Queued")
+        if self.is_enable_db:
+            db.update_task(task_id, size_downloaded=0, status="Queued")
         self.resume_task(task_id)
 
 

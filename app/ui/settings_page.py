@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout, QWidget
-from PySide6Addons import ComboBox, ComboBoxSettingCard, ExpandLayout
+from PySide6Addons import ComboBox, ComboBoxSettingCard, ConfigItem, ExpandLayout
 from PySide6Addons import FluentIcon as FIF
 from PySide6Addons import (
     FolderListSettingCard,
@@ -29,11 +29,15 @@ from PySide6Addons.components.widgets.button import PushButton
 from PySide6Addons.components.widgets.label import CaptionLabel
 
 from ..components.override import CardWidget
-from ..config.constants import DIRS
+from ..config.constants import APP_NAME, DIRS
 from ..theme import Colors, LightMode
 
 qconfig.file = DIRS.user_data_path / "settings.json"
 qconfig.save = lambda: None
+
+qconfig.fontFamilies = ConfigItem(APP_NAME, "FontFamilies", [
+    'Segoe UI', 'Kantumruy Pro', 'Microsoft YaHei', 'PingFang SC'
+])
 
 
 class ColorSettingCard(SettingCard):
