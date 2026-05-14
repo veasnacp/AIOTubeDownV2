@@ -322,12 +322,12 @@ class DownloaderPage(ScrollArea):
 
     def on_download_success(self, task_id, filepath):
         InfoBar.success(
-            "Download Complete", f"File saved to: {filepath}", duration=5000, parent=self.window())
+            "Download Complete", f"File saved to:\n{filepath}", orient=Qt.Vertical, duration=5000, position=InfoBarPosition.BOTTOM, parent=self.window())
         self.filter_tasks()
 
     def on_download_error(self, task_id, error_msg):
         InfoBar.error(
-            "Download Error", f"Error: {error_msg}", duration=5000, parent=self.window())
+            "Download Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=5000, position=InfoBarPosition.BOTTOM, parent=self.window())
         self.filter_tasks()
 
     def on_extract_success(self, task_id, data):
@@ -476,4 +476,4 @@ class DownloaderPage(ScrollArea):
     def on_extract_error(self, task_id, d):
         error_msg = d.get("error")
         InfoBar.error(
-            "Extract Error", f"Error: {error_msg}", duration=5000, parent=self.window())
+            "Extract Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=5000, position=InfoBarPosition.BOTTOM, parent=self.window())

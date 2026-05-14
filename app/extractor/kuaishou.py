@@ -287,10 +287,15 @@ class KuaishouBaseIE(ExtractorBase):
             "extractor": "kuaishou_live"
         }
 
-    def transform_to_ytdlp_formats(self, data: List[Dict]):
+    def transform_to_ytdlp_formats(self, data: List[Dict], url_dl: Optional[str] = None):
         ytdlp_formats = []
 
         for item in data:
+            url = item.get("url") or ""
+            if not url:
+                continue
+            m3u8_url = url if "/video-hls/" in url else None
+
             fmt = {
                 "format_id": f"{item.get('id')}-{item.get('qualityType')}-{item.get('videoCodec')}",
                 "ext": "mp4",
@@ -305,8 +310,12 @@ class KuaishouBaseIE(ExtractorBase):
                 "protocol": "https",
                 "vbr": item.get("avgBitrate"),
                 "container": "mp4",
-                "url": item.get("url"),
             }
+            if m3u8_url and url_dl:
+                fmt["m3u8_url"] = m3u8_url
+                fmt["url"] = url_dl
+            else:
+                fmt["url"] = url
 
             if item.get("backupUrl"):
                 fmt["extra_urls"] = item.get("backupUrl")
@@ -335,6 +344,8 @@ class KuaishouBaseIE(ExtractorBase):
 
         video_id = str(node.get("share_info", "photoId=error")
                        ).split("photoId=")[1].strip()
+        if video_id == "error":
+            video_id = node.get("id", "")
 
         width = node.get("width", 0)
         height = node.get("height", 0)
@@ -351,11 +362,25 @@ class KuaishouBaseIE(ExtractorBase):
         cover = node["coverUrls"][0]["url"] if node.get(
             "coverUrls") is not None else ""
 
+        if not cover and isinstance(node.get("coverUrl"), str):
+            cover = node["coverUrl"]
+
         url_dl = ""
-        if isinstance(node.get("mainMvUrls"), list) and len(node["mainMvUrls"]) > 0:
+        has_mainMvUrls = isinstance(
+            node.get("mainMvUrls"), list) and len(node["mainMvUrls"]) > 0
+        mainUrls = None
+        if not has_mainMvUrls:
+            has_mainMvUrls = isinstance(
+                node.get("photoUrls"), list) and len(node["photoUrls"]) > 0
+            mainUrls = node["photoUrls"]
+        elif has_mainMvUrls:
             mainUrls = node["mainMvUrls"]
+
+        if isinstance(mainUrls, list) and len(mainUrls) > 0:
             url_dl = str(mainUrls[1]["url"] if len(
                 mainUrls) > 1 else mainUrls[0]["url"])
+            # url_dl = url_dl.replace(
+            #     "tymov2.a.kwimgs.com", "hwmov.a.yximgs.com", 1)
 
         both = []
         if "manifest" in node and isinstance(node["manifest"], dict):
@@ -366,7 +391,8 @@ class KuaishouBaseIE(ExtractorBase):
                 for adaptation in adaptations:
                     if isinstance(adaptation.get("representation"), list):
                         representation = adaptation["representation"]
-                        both = self.transform_to_ytdlp_formats(representation)
+                        both = self.transform_to_ytdlp_formats(
+                            representation, url_dl)
                         if not url_dl and len(both) > 0:
                             url_dl = both[0].get("url")
                         break
@@ -414,6 +440,14 @@ class KuaishouBaseIE(ExtractorBase):
             "audio_only": [],
             "video_only": [],
             "both": both,
+            "http_headers": {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Connection': 'keep-alive',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': f'{self._BASE_URL}/',
+                'Origin': self._BASE_URL,
+            },
             "user_info": {
                 "id": user_id,
                 "name": node.get("userName", user_id),
@@ -423,6 +457,16 @@ class KuaishouBaseIE(ExtractorBase):
                 "is_verified": node.get("verified", False),
             }
         }
+        if not user_id and isinstance(node.get('author'), dict):
+            author = node['author']
+            info_dict['user_info'].update({
+                'id': author.get('id', ''),
+                'name': author.get('name', ''),
+                'username': author.get('id', ''),
+                'kwai_id': author.get('kwaiId', ''),
+                'avatar': author.get('headerUrl') or "",
+                'is_verified': author.get('verified', False),
+            })
 
         return info_dict
 
@@ -991,21 +1035,30 @@ class KuaishouExtractor(KuaishouBaseIE):
 
             try:
                 data = resp.json()
+                self.save_test_data(data, suffix="_user_test")
                 node_list = data.get('feeds', [])
                 if not node_list:
                     break
+
+                next_pcursor = data.get("pcursor", "")
+                has_more = bool(next_pcursor and next_pcursor != 'no_more')
                 for node in node_list:
                     if "photo" not in node:
                         continue
+                    if "author" in node and isinstance(node.get("author"), dict):
+                        node['photo']['author'] = node['author']
+                        node['photo']['userEid'] = node['author'].get("id", "")
+                        node['photo']['userName'] = node['author'].get(
+                            "name", "")
+
                     info_dict = self.extract_node(node['photo'])
                     info_dict['cursor'] = pcursor
-                    info_dict['next_cursor'] = pcursor if has_more else ''
+                    info_dict['next_cursor'] = next_pcursor if has_more else ''
                     info_dict['cursor_position'] = pcursor_position
                     video_info_list.append(info_dict)
                     count += 1
 
-                pcursor = data.get("pcursor", "")
-                has_more = bool(pcursor and pcursor != 'no_more')
+                pcursor = next_pcursor
                 pcursor_position += 1
             except Exception as e:
                 self.logger.debug(f"[*] Exception: {e}")
@@ -1018,11 +1071,13 @@ class KuaishouExtractor(KuaishouBaseIE):
         url = self._LINK_USER_WITH % '3x36h86rp4kvnzs'
         self.logger.debug(f"Video URL: {url}")
 
-        info_list = await self.get_video_info_list_from_user(url, limit=10, use_per_next_cursor=False)
+        info_list = await self.get_video_info_list_from_user(
+            url, limit=10, cursor_continue='1.775279694752E12', cursor_position=1, use_per_next_cursor=False
+        )
         if info_list:
-            # previous_data = self.load_test_data('_user')
-            # if previous_data:
-            #     info_list = previous_data + info_list
+            previous_data = self.load_test_data('_user')
+            if previous_data:
+                info_list = previous_data + info_list
             self.logger.debug(f"Total videos: {len(info_list)} video")
             self.save_test_data(info_list, '_user')
         return info_list
@@ -1033,7 +1088,7 @@ class KuaishouExtractor(KuaishouBaseIE):
         url, _video_id = self.get_url_video_id(url)
         self.logger.debug(f"Video URL: {url}, {_video_id}")
         url_list = [
-            url,
+            # url,
             self._LINK_VIDEO_ID % "3x25by2mwk82ute",
         ]
         info_list = await self.get_video_info_list(url_list)

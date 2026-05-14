@@ -56,9 +56,9 @@ def test_kuaishou_extractor():
     raw_cookies = "kpf=PC_WEB; clientid=3; did=web_a57307288ba306c14669408932dc8be2; kwpsecproductname=kuaishou-vision; didv=1778675976000; kwssectoken=M4BDxBh8kgkoZQlTyHC7R5aQiYZEGpnHd+q4ZEBKmkuxDngnxeOIkpiijAXOGuQpFHDa+OOAvhmKBo6pQoLDjA==; kwscode=933f4035f7715a5bd619333317306be85211bb1c7aafb83e9a7c35189ce05e1d; kwpsecproductname=kuaishou-vision; userId=4050169184; kuaishou.server.webday7_st=ChprdWFpc2hvdS5zZXJ2ZXIud2ViZGF5Ny5zdBKwAZpBNrGfPZbALmIw9m6TyykNfrZgy94M3tlpFYhXF-WSV0N1KcC4mJES9UvsMntNR6krnbsDe-SCrx-GFPJ0eYXA029k5ELOImZ-zInbs2t4zow60hZLbi8yoqlw4PE9_SywCqrhbjRqhAY9leggfSD4EGRa9k-18kdwk-8sTQ-9sl8R1TvtgCjfUCNjpgcklI8SrgLOcWxrkqPcrNjEk9iZClAZP2QnsTuvSeibhW8KGhJU_gXNYziT2t91N_-T3FZPsZEiIJn9NAjYVKAthMyPV7IV-9tPcD25z2oZAFprZj69pzo2KAUwAQ; kuaishou.server.webday7_ph=87b9004090fa2adb005c99f6ca7798426de6; ktrace-context=1|MS44Nzg0NzI0NTc4Nzk2ODY5LjQ5MzQyODU2LjE3Nzg2ODU5NTU2NDYuMjgzMTMzMQ==|MS44Nzg0NzI0NTc4Nzk2ODY5LjU5ODYyOTMxLjE3Nzg2ODU5NTU2NDYuMjgzMTMzMg==|0|webservice-user-growth-node|webservice|true|src-Js; kpn=KUAISHOU_VISION; kwfv1=PeDA80mSG00ZF8e400wnrU+fr78fLAwn+f+erh8nz0Pfbf+fbS8e8f+erEGA40+epf+nbS8emSP0cMGfb08Bbf8eDMG/ZF+9p0+0Hh+nrM8eLE+nLUPn+j8f8D80ZhGnrA+/YDP/r9P9pjGfGMG9rM+0W7+nc78fQYPALl+nG7w/Qfw/zjweLIG9P9wnzSweHFGAYS8fGE+0rA+fQY+080Pc==; kwssectoken=GgyYfAz9fs2c54I+nuxHXkPpptmakmkNsp/tEEzdwFs6tR5C+7o0Piqz6NVlGIVjfca/ZBp+VicViWBtqqPg9g==; kwscode=04dc103d63222cfdfec0057c058fb1c4c5f2eb14eefcce98b2a503578e5f8431"
     kuaishou = KuaishouExtractor()
     kuaishou.set_test_mode(True)
-    kuaishou.set_cookies(raw_cookies)
-    # asyncio.run(kuaishou.test_get_video_info_list())
-    asyncio.run(kuaishou.test_get_video_info_list_from_user())
+    # kuaishou.set_cookies(raw_cookies)
+    asyncio.run(kuaishou.test_get_video_info_list())
+    # asyncio.run(kuaishou.test_get_video_info_list_from_user())
 
 
 def test_drama_sansekai_extractor():

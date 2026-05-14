@@ -275,8 +275,11 @@ class DownloadWorker(QRunnable):
             'noplaylist': True,
             'merge_output_format': 'mp4' if has_ffmpeg else None,
             'overwrites': True,
-            'http_chunk_size': self.chunk_size,
+            'http_chunk_size': self.chunk_size
         }
+        if self.info and 'http_headers' in self.info and self.info['http_headers']:
+            ydl_opts['http_headers'] = self.info['http_headers']
+
         try:
             if NodeRunner:
                 # --js-runtimes node:/path/to/node

@@ -150,6 +150,7 @@ class AddUrlDialog(MessageBoxBase):
         self.viewLayout.setSpacing(10)
         self.viewLayout.setContentsMargins(10, 10, 10, 10)
 
+        self.widget.resize(self.window().width() - 100, 600)
         self.widget.setMinimumWidth(600)
 
     def _update_stats(self):
