@@ -302,6 +302,7 @@ class ImageLoadTask(QRunnable):
         return data
 
     def run(self):
+        logger.debug(f"ImageLoadTask url: {self.url}")
         try:
 
             resp = requests.get(self.url, impersonate='safari170', verify=True)

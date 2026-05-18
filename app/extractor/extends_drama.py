@@ -29,19 +29,19 @@ class YouTubeExtractor(_YouTubeExtractor):
         limit: Optional[int] = None,
         sort_by: YouTubeSortBy.ChannelVideos = "newest",
         next_data: Optional[dict] = None,
+        cursor_position: int = 0,
         use_per_next_cursor: bool = False,
         content_type: YouTubeSortBy.VideoType = "videos"
     ):
-        info_list = []
-        async for data in self.get_channel_videos(
+        info_list = await self.get_channel_videos(
             url,
             content_type,
             limit,
             sort_by,
+            next_data,
+            cursor_position,
             use_per_next_cursor,
-            next_data
-        ):
-            info_list.append(data)
+        )
 
         if not isinstance(info_list, list):
             self.logger.error(f"[!] ❌ No channel/videos info found")

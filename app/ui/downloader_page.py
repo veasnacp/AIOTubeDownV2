@@ -1,10 +1,19 @@
 import os
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 import humanize
 from loguru import logger
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal, Slot
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPropertyAnimation,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QColor, QIcon, QPixmap, QResizeEvent
 from PySide6.QtWidgets import QHBoxLayout, QToolButton, QVBoxLayout, QWidget
 from PySide6Addons import (
@@ -17,6 +26,7 @@ from PySide6Addons import (
     ScrollArea,
     SegmentedWidget,
     SimpleCardWidget,
+    StateToolTip,
     SubtitleLabel,
     isDarkTheme,
     qconfig,
@@ -110,6 +120,8 @@ class DownloaderPage(ScrollArea):
         self.file_detail_layout.setAlignment(Qt.AlignTop)
         self.main_layout.addWidget(self.file_detail)
 
+        self.loading_bar: Optional[StateToolTip] = None
+
         class IconWidget(TransparentToolButton):
             def setStyleSheet(self, styleSheet: str, /) -> None:
                 styleSheet = styleSheet + \
@@ -198,6 +210,7 @@ class DownloaderPage(ScrollArea):
         manager.task_filename_updated.connect(
             self.download_table.update_filename)
 
+        extract_manager.task_progress.connect(self.on_extract_progress)
         extract_manager.task_finished.connect(self.on_extract_success)
         extract_manager.task_error.connect(self.on_extract_error)
 
@@ -321,14 +334,77 @@ class DownloaderPage(ScrollArea):
                     manager.redownload_task(item.data(Qt.UserRole))
 
     def on_download_success(self, task_id, filepath):
+        basename = Path(filepath).name
         InfoBar.success(
-            "Download Complete", f"File saved to:\n{filepath}", orient=Qt.Vertical, duration=5000, position=InfoBarPosition.BOTTOM, parent=self.window())
+            "Download Complete", f"File: {basename}", orient=Qt.Vertical, duration=3500, position=InfoBarPosition.BOTTOM, parent=self.window())
         self.filter_tasks()
 
     def on_download_error(self, task_id, error_msg):
         InfoBar.error(
-            "Download Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=5000, position=InfoBarPosition.BOTTOM, parent=self.window())
+            "Download Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=3500, position=InfoBarPosition.BOTTOM, parent=self.window())
         self.filter_tasks()
+
+    def _close_loading_bar(self, status: str = "progress"):
+        if self.loading_bar:
+            if status == "success":
+                self.loading_bar.setTitle("Scraped successfully ✅")
+            elif status == "progress":
+                self.loading_bar.setTitle("Scraping progress ...")
+            elif status == "error":
+                self.loading_bar.setTitle("Scraped error ❌")
+            self.loading_bar.setContent("")
+            self.loading_bar.setState(True)
+        self.loading_bar = None
+
+    def _show_loading_bar(self, title: str, content: str):
+        self.loading_bar = StateToolTip(
+            title,
+            content,
+            self.window()
+        )
+        # move to bottom center
+        window_width = self.window().width()
+        window_height = self.window().height()
+        tooltip_width = self.loading_bar.width()
+        tooltip_height = self.loading_bar.height()
+        x = (window_width - tooltip_width) // 2
+        y = window_height - tooltip_height - 30
+        self.loading_bar.move(x, y)
+        self.loading_bar.show()
+
+    def on_extract_progress(self, task_id, data):
+        if data['status'] == 'start':
+            try:
+                extractor_name = data.get('extractor')
+                self._show_loading_bar(
+                    f"Scraping data from {extractor_name}",
+                    f"Please wait...",
+                )
+            except Exception as e:
+                logger.debug(f"Scrape error: {e}")
+        elif data['status'] == 'progress':
+            try:
+                self._close_loading_bar()
+                url = data['original_url'] if data.get(
+                    'original_url') else data['url']
+                self._show_loading_bar(
+                    f"Scraping data from {url}",
+                    f"Please wait...",
+                )
+            except Exception as e:
+                logger.debug(f"Scrape error: {e}")
+        elif data['status'] == 'error':
+            try:
+                self._close_loading_bar("error")
+                url = data['url']
+                self._show_loading_bar(
+                    f"Scrape error from {url}",
+                    f"Error: {data.get('error') or 'Unknown error'}",
+                )
+                QTimer.singleShot(
+                    3500, lambda: self._close_loading_bar("error"))
+            except Exception as e:
+                logger.debug(f"Scrape error: {e}")
 
     def on_extract_success(self, task_id, data):
         status = data.get("status")
@@ -351,6 +427,8 @@ class DownloaderPage(ScrollArea):
                     'status': 'Downloading', 'size_total': 0, 'size_downloaded': 0
                 }
                 self.download_table.add_task_to_table(task_data)
+
+        QTimer.singleShot(2000, lambda: self._close_loading_bar("success"))
 
     def toggle_file_detail(self):
         is_visible = self.file_detail.isVisible()
@@ -474,6 +552,13 @@ class DownloaderPage(ScrollArea):
                     self.update()
 
     def on_extract_error(self, task_id, d):
-        error_msg = d.get("error")
-        InfoBar.error(
-            "Extract Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=5000, position=InfoBarPosition.BOTTOM, parent=self.window())
+        try:
+            self._close_loading_bar("error")
+            url = d['url'] if d.get('url') else 'Unknown URL'
+            self._show_loading_bar(
+                f"Scrape error from {url}",
+                f"Error: {d.get('error') or 'Unknown error'}",
+            )
+            QTimer.singleShot(3500, lambda: self._close_loading_bar("error"))
+        except Exception as e:
+            logger.debug(f"Scrape error: {e}")

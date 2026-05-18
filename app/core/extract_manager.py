@@ -201,8 +201,10 @@ class ExtractWorker(DefaultWorker):
                     scout.on_extracting = on_callback_progress
                     info_list = []
                     for url in self.urls:
-                        async for video_info in scout.get_channel_videos(url):
-                            info_list.append(video_info)
+                        video_info_list = await scout.get_channel_videos(url)
+                        if not video_info_list:
+                            continue
+                        info_list.extend(video_info_list)
                     self.signals.finished.emit(self.task_id, {
                         'status': 'finished',
                         'data': info_list
@@ -231,6 +233,7 @@ class ExtractWorker(DefaultWorker):
                 async with extractor_class() as scout:
                     scout.cancel = self.cancel
 
+                    extractor_name = None
                     try:
                         cookies = self.extract_options.get("cookies") or {}
                         extractor_name = scout._CLOUD_FOLDER.split("/")[-1]
@@ -249,6 +252,11 @@ class ExtractWorker(DefaultWorker):
                             self.signals.error.emit(self.task_id, d)
 
                     scout.on_extracting = on_callback_progress
+                    if extractor_name:
+                        self.signals.progress.emit(self.task_id, {
+                            'status': 'start',
+                            'extractor': f"{extractor_name}".upper(),
+                        })
                     info_list = await scout.get_video_info_list(self.urls)
                     self.signals.finished.emit(self.task_id, {
                         'status': 'finished',

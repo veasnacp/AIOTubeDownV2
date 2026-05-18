@@ -5,6 +5,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Union
+from urllib import parse
 
 from curl_cffi.requests import (
     AsyncSession,
@@ -64,6 +65,22 @@ def get_content_from_html_selector(
 
 def dict_to_query_string(dict_obj: dict):
     return json.dumps(dict_obj, separators=(',', ':'))
+
+
+def _urlencode(
+    params,
+    doseq: bool = False,
+    safe: str = "",
+    encoding: Union[str, None] = None,
+    errors: Union[str, None] = None,
+    quote_via=parse.quote
+):
+    return parse.urlencode(params, doseq, safe, encoding, errors, quote_via)
+
+
+def generate_url_query(url: str, params: dict[str, str]):
+    # query = '&'.join(f'{key}={value}' for key, value in params.items())
+    return f"{url}?{_urlencode(params)}"
 
 
 def get_proxies(

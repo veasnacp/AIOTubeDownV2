@@ -723,6 +723,7 @@ class YouTubeExtractor(YouTubeBaseIE):
         sleep: int,
         sort_by: Optional[YouTubeSortBy.ChannelVideos] = None,
         next_data: Optional[dict] = None,
+        cursor_position: int = 0,
         use_per_next_cursor: bool = False,
     ):
 
@@ -730,11 +731,16 @@ class YouTubeExtractor(YouTubeBaseIE):
             next_data, dict) and next_data.get('token') else True
         count = 0
 
-        html = await self.get_initial_data(url)
+        cursor_position = int(cursor_position) if isinstance(cursor_position, int) \
+            else int(0)
+
+        # html = await self.get_initial_data(url)
+        html = self.load_text_data()
 
         if not html:
             return
 
+        # self.save_html_text(html)
         # Extraction
         client = json.loads(get_json_from_html(
             html, "INNERTUBE_CONTEXT", 2, '"}},') + '"}}')["client"]
@@ -749,6 +755,7 @@ class YouTubeExtractor(YouTubeBaseIE):
             html, "var ytInitialData = ", 0, "};") + "}")
 
         # Channel Metadata Extraction
+        info_list = []
         user_info = None
         try:
             data_user = next(search_dict(data, "channelMetadataRenderer"))
@@ -764,6 +771,12 @@ class YouTubeExtractor(YouTubeBaseIE):
             pass
 
         while True:
+            if self.cancel:
+                break
+
+            if limit and len(info_list) >= limit:
+                break
+
             if is_first:
                 next_data = self.get_next_data(data, sort_by)
                 is_first = False
@@ -773,33 +786,93 @@ class YouTubeExtractor(YouTubeBaseIE):
                 data = await self.get_ajax_data(api_endpoint, api_key, next_data, client)
                 next_data = self.get_next_data(data)
 
-            for result in search_dict(data, selector):
-                count += 1
+            if "contents" in data:
+                try:
+                    tabs = data["contents"]["twoColumnBrowseResultsRenderer"]["tabs"]
+                    contents = None
+                    for tab in tabs:
+                        tabRenderer = tab["tabRenderer"]
+                        if "selected" in tabRenderer and tabRenderer["selected"]:
+                            contents = tabRenderer["content"]["richGridRenderer"]["contents"]
+                            break
+                    if isinstance(contents, list):
+                        for content in contents:
+                            lockupViewModel = next(
+                                search_dict(content, "lockupViewModel"))
+                            video_id = lockupViewModel.get("contentId")
+                            if not video_id:
+                                video_id = next(search_dict(
+                                    lockupViewModel, 'reelWatchEndpoint'), {}).get('videoId')
+                            thumbnails = next(search_dict(
+                                lockupViewModel['contentImage'], "sources"))
+                            title = next(search_dict(lockupViewModel['metadata'], "title"), {}).get(
+                                "content", "")
 
-                # Logic for Video ID and Reel fallback
-                video_id = result.get('videoId')
-                if not video_id:
-                    video_id = next(search_dict(
-                        result, 'reelWatchEndpoint'), {}).get('videoId')
+                            _info = {
+                                "id": video_id,
+                                "title": title,
+                                "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                                "thumbnails": thumbnails,
+                                "url": self._LINK_ID % video_id,
+                            }
+                            if isinstance(user_info, dict) and next_data:
+                                _info.update({
+                                    "uploader": user_info.get("name") if user_info else "",
+                                    "uploader_id": user_info.get("id") if user_info else "",
+                                    "extractor": "youtube",
+                                    "user_info": user_info,
+                                    "next_data": next_data,
+                                    "cursor_position": cursor_position
+                                    # "string_next_data": quote(dict_to_query_string(next_data))
+                                })
+                            info_list.append(_info)
+                            self.on_extracting({
+                                "status": "progress",
+                                "data": _info
+                            })
 
-                if isinstance(user_info, dict) and next_data:
-                    next_data.update({"videoId": video_id or ''})
-                    result.update({
-                        "videoId": video_id or '',
-                        "user_info": user_info,
-                        "next_data": next_data,
-                        "string_next_data": quote(dict_to_query_string(next_data))
+                except Exception as e:
+                    self.logger.debug(f"Failed to extract video metadata: {e}")
+            else:
+                for result in search_dict(data, selector):
+                    count += 1
+
+                    # Logic for Video ID and Reel fallback
+                    video_id = result.get('videoId')
+                    self.logger.debug(f"video_id: {video_id}")
+                    if not video_id:
+                        video_id = next(search_dict(
+                            result, 'reelWatchEndpoint'), {}).get('videoId')
+
+                    if isinstance(user_info, dict) and next_data:
+                        next_data.update({"videoId": video_id or ''})
+                        result.update({
+                            "videoId": video_id or '',
+                            "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                            "url": self._LINK_ID % (video_id or ''),
+                            "extractor": "youtube",
+                            "uploader": user_info.get("name") if user_info else "",
+                            "uploader_id": user_info.get("id") if user_info else "",
+                            "user_info": user_info,
+                            "next_data": next_data,
+                            "cursor_position": cursor_position
+                            # "string_next_data": quote(dict_to_query_string(next_data))
+                        })
+
+                    self.on_extracting({
+                        "status": "progress",
+                        "data": result
                     })
+                    info_list.append(result)
 
-                yield result
-
-                if not use_per_next_cursor and limit and count >= limit:
-                    return
-
-            if use_per_next_cursor or not next_data:
+            if not isinstance(limit, int) and use_per_next_cursor:
                 break
-
+            if not next_data:
+                break
+            cursor_position += 1
             await asyncio.sleep(sleep)
+
+        return info_list
 
     async def get_channel_videos(
         self,
@@ -807,11 +880,12 @@ class YouTubeExtractor(YouTubeBaseIE):
         content_type: YouTubeSortBy.VideoType = "videos",
         limit: Optional[int] = None,
         sort_by: YouTubeSortBy.ChannelVideos = "newest",
-        use_per_next_cursor: bool = False,
         next_data: Optional[dict] = None,
+        cursor_position: int = 0,
+        use_per_next_cursor: bool = False,
     ):
         url = f"{channel_url}/{content_type}"
-        async for item in self.get_videos(
+        return await self.get_videos(
             url,
             "https://www.youtube.com/youtubei/v1/browse",
             content_type or 'videos',
@@ -819,13 +893,9 @@ class YouTubeExtractor(YouTubeBaseIE):
             1,
             sort_by,
             next_data,
+            cursor_position,
             use_per_next_cursor,
-        ):
-            self.on_extracting({
-                "status": "progress",
-                "data": item
-            })
-            yield item
+        )
 
     async def get_video_info_list(
         self, url_list: list[str],
@@ -906,6 +976,20 @@ class YouTubeExtractor(YouTubeBaseIE):
             progress_callback=progress_callback,
             is_test=is_test
         )
+
+    async def test_get_video_info_list_from_user(self):
+        self._skip_cached_info = True
+        url = self._LINK_USERNAME % '1MinuteMotivation'
+        self.logger.debug(f"Video URL: {url}")
+
+        info_list = await self.get_channel_videos(url, use_per_next_cursor=True)
+        if info_list:
+            # previous_data = self.load_test_data('_user')
+            # if previous_data:
+            #     info_list = previous_data + info_list
+            self.logger.debug(f"Total videos: {len(info_list)} video")
+            self.save_test_data(info_list, '_user')
+        return info_list
 
     async def test_get_video_info_list(self):
         self._skip_cached_info = True

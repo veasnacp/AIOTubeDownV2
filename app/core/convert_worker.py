@@ -4,6 +4,8 @@ import subprocess
 import time
 from typing import Callable, List, Literal, Optional
 
+from loguru import logger
+
 from ..utils.path import split_filepath
 from ._worker import Callback, DefaultWorker
 
@@ -211,6 +213,8 @@ class VideoConverter(Callback):
         self.percentage = 0
         self.cancel = False
 
+        self.logger = logger.bind(name=self.__class__.__name__)
+
     def get_video_duration(self, video_path, default=0.0):
         try:
             startupinfo = silent_cli()
@@ -221,8 +225,8 @@ class VideoConverter(Callback):
             duration_str, _ = duration_process.communicate()
             return float(duration_str.decode('utf-8').strip())
         except (ValueError, FileNotFoundError, subprocess.CalledProcessError) as e:
-            print(f"Error getting duration: {e}")
-            return default  # Or some default value
+            self.logger.error(f"Error getting duration: {e}")
+            return default
 
     def get_duration_from_many_videos(self, video_paths: list[str], default=0.0):
         """
@@ -231,7 +235,7 @@ class VideoConverter(Callback):
         total_duration = 0.0
         for video_path in video_paths:
             if not os.path.exists(video_path):
-                print(f"File not found: {video_path}")
+                self.logger.error(f"File not found: {video_path}")
                 return default
 
             total_duration += self.get_video_duration(video_path)
@@ -255,7 +259,6 @@ class VideoConverter(Callback):
             (line for line in stderr.decode().splitlines() if "Duration:" in line), None)
         if duration_line:
             duration_str = duration_line.split("Duration: ")[1].split(",")[0]
-            print('duration_str', duration_line)
             hours, minutes, seconds = map(float, duration_str.split(":"))
             total_seconds = hours * 3600 + minutes * 60 + seconds
         else:
@@ -359,10 +362,7 @@ class VideoConverter(Callback):
             video_path, audio_url_or_path, output_filepath)
         self.run()
         output_filepath_basename = os.path.basename(output_filepath)
-        # print(output_filepath)
         for file in [video_path, audio_url_or_path]:
-            # print(os.path.basename(file), output_filepath_basename)
-            # print(os.path.basename(file) != output_filepath_basename)
             if os.path.basename(file) != output_filepath_basename:
                 self.remove_file_when_finished(file, remove_original_file)
 
@@ -461,7 +461,6 @@ class VideoConverter(Callback):
                             if percentage >= self.percentage:
                                 self.percentage = 99 if percentage >= 99 else percentage
 
-                            print('progress', percentage, total_seconds)
                             if use_on_progressing:
                                 self.callbackProgress({
                                     'progress': self.percentage,
@@ -470,9 +469,9 @@ class VideoConverter(Callback):
                                     'status': 'progress',
                                 })
                         except ValueError as e:
-                            print("Error Processing:", e)
+                            self.logger.error(f"Error Processing: {e}")
                         except Exception as e:
-                            print("Error getting duration:", e)
+                            self.logger.error(f"Error getting duration: {e}")
 
             process.wait()  # Ensure process finishes
 

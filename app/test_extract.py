@@ -20,11 +20,26 @@ def test_youtube_extractor():
     youtube = YouTubeExtractor()
     youtube.set_test_mode(True)
     # asyncio.run(youtube.test_get_video_info_list())
+    asyncio.run(youtube.test_get_video_info_list_from_user())
 
-    info_list = youtube.load_test_data()
-    if info_list:
-        asyncio.run(youtube.download_all_videos(
-            info_list, with_site_name=True, with_channel_name=True, is_test=True))
+    # info_list = youtube.load_test_data()
+    # if info_list:
+    #     asyncio.run(youtube.download_all_videos(
+    #         info_list, with_site_name=True, with_channel_name=True, is_test=True))
+
+
+def test_facebook_extractor():
+    from .extractor.facebook import FacebookExtractor
+
+    facebook = FacebookExtractor()
+    facebook.set_test_mode(True)
+    asyncio.run(facebook.test_get_video_info_list())
+    # asyncio.run(facebook.test_get_video_info_list_from_user())
+
+    # info_list = youtube.load_test_data()
+    # if info_list:
+    #     asyncio.run(youtube.download_all_videos(
+    #         info_list, with_site_name=True, with_channel_name=True, is_test=True))
 
 
 def test_tiktok_extractor():
@@ -254,9 +269,10 @@ class ShortTvCrypto:
 def test_all():
     logger.info("Testing Extractor:")
     # test_youtube_extractor()
+    test_facebook_extractor()
     # test_tiktok_extractor()
     # test_douyin_extractor()
-    test_kuaishou_extractor()
+    # test_kuaishou_extractor()
     # test_drama_sansekai_extractor()
     # test_drama_box_extractor()
     # test_reelshort_extractor()

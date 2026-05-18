@@ -473,9 +473,9 @@ class TikTokExtractor(TikTokBaseIE):
             if not web_page:
                 return None
 
-            for cookie_name in filter(None, cookie_names):
-                self.session.cookies.jar.clear(
-                    domain='.tiktok.com', path='/', name=cookie_name)
+            # for cookie_name in filter(None, cookie_names):
+            #     self.session.cookies.jar.clear(
+            #         domain='.tiktok.com', path='/', name=cookie_name)
 
         return web_page
 
