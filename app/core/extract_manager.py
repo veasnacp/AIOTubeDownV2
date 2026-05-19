@@ -12,8 +12,8 @@ from PySide6.QtCore import QObject, QThreadPool, Signal, Slot
 
 from ..extractor.douyin import DouyinExtractor
 
-# from ..extractor.facebook import FacebookExtractor
 # from ..extractor.instagram import InstagramExtractor
+from ..extractor.facebook import FacebookExtractor
 from ..extractor.kuaishou import KuaishouExtractor
 from ..extractor.tiktok import TikTokExtractor
 from ..extractor.youtube import YouTubeExtractor
@@ -21,7 +21,8 @@ from ._worker import DefaultWorker, Slot
 
 TYPE_EXTRACTOR: TypeAlias = Union[
     'YouTubeExtractor', 'TikTokExtractor',
-    # 'FacebookExtractor', 'InstagramExtractor',
+    'FacebookExtractor',
+    # 'InstagramExtractor',
     'KuaishouExtractor', 'DouyinExtractor'
 ]
 
@@ -42,7 +43,7 @@ BASE_EXTRACTORS = {
     # "instagram": InstagramExtractor,
     "tiktok": TikTokExtractor,
     "youtube": YouTubeExtractor,
-    # "facebook": FacebookExtractor,
+    "facebook": FacebookExtractor,
     "kuaishou": KuaishouExtractor,
     "douyin": DouyinExtractor,
 }

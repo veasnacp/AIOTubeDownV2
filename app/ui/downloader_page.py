@@ -313,6 +313,18 @@ class DownloaderPage(ScrollArea):
                 if item:
                     manager.stop_task(item.data(Qt.UserRole))
 
+        try:
+            self._close_loading_bar("progress", "Stopping download...")
+            self._show_loading_bar(
+                f"Stopping download...",
+                f"Please wait...",
+            )
+        except Exception as e:
+            logger.debug(f"Stop error: {e}")
+
+        QTimer.singleShot(2000, lambda: self._close_loading_bar(
+            "progress", "Download is stopped!"))
+
     def resume_selected(self, task_id=None):
         if task_id and isinstance(task_id, int):
             manager.resume_task(task_id)
@@ -344,9 +356,11 @@ class DownloaderPage(ScrollArea):
             "Download Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=3500, position=InfoBarPosition.BOTTOM, parent=self.window())
         self.filter_tasks()
 
-    def _close_loading_bar(self, status: str = "progress"):
+    def _close_loading_bar(self, status: str = "progress", title=None):
         if self.loading_bar:
-            if status == "success":
+            if title:
+                self.loading_bar.setTitle(title)
+            elif status == "success":
                 self.loading_bar.setTitle("Scraped successfully ✅")
             elif status == "progress":
                 self.loading_bar.setTitle("Scraping progress ...")

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from PySide6Addons import FluentIcon, ProgressBar, TableWidget
 
 from ..components.override import RoundMenu
+from ..components.player import VideoPlayerDialog
 from ..db.database import db
 from ..utils.path import reveal_file, trigger_windows_open_with
 from .properties_dialog import PropertiesDialog
@@ -145,6 +146,14 @@ class DownloadTable(TableWidget):
 
         menu.exec(event.globalPos())
 
+    def play_video(self, file_path: str):
+        dialog = VideoPlayerDialog(self.window())
+
+        dialog.resizePortrait()
+        dialog.setVideo(file_path)
+        dialog.play()
+        dialog.show()
+
     def _open_file(self, task_id):
         conn = db.get_connection()
         row = conn.execute(
@@ -153,7 +162,8 @@ class DownloadTable(TableWidget):
         if row and row[1] and row[0]:
             path = os.path.join(row[1], row[0])
             if os.path.exists(path):
-                os.startfile(path)
+                self.play_video(path)
+                # os.startfile(path)
 
     def _open_with(self, task_id):
         conn = db.get_connection()

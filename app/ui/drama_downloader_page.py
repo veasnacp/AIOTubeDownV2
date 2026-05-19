@@ -51,13 +51,13 @@ from PySide6Addons import (
     isDarkTheme,
     setFont,
 )
-from PySide6Addons.multimedia import VideoWidget
 
 from ..components.icons import FileIcon
 from ..components.override import CardWidget, CheckableMenu
 from ..components.override import TextAreaInput as TextEdit
 from ..components.override import TextInput as LineEdit
 from ..components.override import TransparentDropDownToolButton, TransparentToolButton
+from ..components.player import VideoPlayerDialog
 from ..core._worker import DefaultWorker
 from ..extractor.drama import (
     DramaBiteExtractor,
@@ -70,6 +70,7 @@ from ..extractor.drama import (
     StardustTvExtractor,
 )
 from ..extractor.extends_drama import (
+    FacebookExtractor,
     KuaishouExtractor,
     TikTokExtractor,
     YouTubeExtractor,
@@ -81,7 +82,8 @@ TYPE_DRAMA_EXTRACTOR: TypeAlias = Optional[Union[
     'DramaBiteExtractor', 'DramaBoxExtractor',
     'ReelShortExtractor', 'RushShortsTvExtractor',
     'ShortMovsExtractor', 'StardustTvExtractor',
-    'KuaishouExtractor', 'TikTokExtractor', 'YouTubeExtractor'
+    'KuaishouExtractor', 'TikTokExtractor', 'YouTubeExtractor',
+    'FacebookExtractor'
 ]]
 
 
@@ -95,6 +97,7 @@ REGEX_DRAMA = [
     (KuaishouExtractor._BASE_URL, KuaishouExtractor),
     (TikTokExtractor._BASE_URL, TikTokExtractor),
     (YouTubeExtractor._BASE_URL, YouTubeExtractor),
+    (FacebookExtractor._BASE_URL, FacebookExtractor),
 ]
 
 DRAMA_ICONS = {
@@ -107,7 +110,8 @@ DRAMA_ICONS = {
     "stardusttv_downloader": FileIcon.STARDUSTTV_LOGO,
     "kuaishou_downloader": FileIcon.KUAISHOU_LOGO,
     "tiktok_downloader": FileIcon.TIKTOK_LOGO,
-    "youtube_downloader": FileIcon.YOUTUBE_LOGO
+    "youtube_downloader": FileIcon.YOUTUBE_LOGO,
+    "facebook_downloader": FileIcon.FACEBOOK_LOGO
 }
 
 CACHE_DRAMA = {}
@@ -462,51 +466,6 @@ class EpisodeButton(TogglePushButton):
         return super().setStyleSheet(styleSheet)
 
 
-class DramaVideoPlayerDialog(QDialog):
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.vBoxLayout = QVBoxLayout(self)
-        self.videoWidget = VideoWidget(self)
-
-        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
-        self.vBoxLayout.addWidget(self.videoWidget)
-        self.setMinimumWidth(450)
-        self.videoWidget.setMinimumWidth(450)
-
-        self.setStyleSheet(f"""
-        QDialog {{
-            border-radius: 12px;
-            background-color: {DarkMode.card if isDarkTheme() else LightMode.card};
-        }}
-        """)
-
-    def resizePortrait(self):
-        self.resize(450, 800)
-        self.videoWidget.resize(450, 800)
-
-    def resizeLandscape(self):
-        self.resize(800, 450)
-        self.videoWidget.resize(800, 450)
-
-    def setVideo(self, video_url: str):
-        basename = urlparse(video_url).path.split("/")[-1]
-        self.setWindowTitle(basename)
-        self.videoWidget.setVideo(QUrl(video_url))
-
-    def play(self):
-        self.videoWidget.play()
-
-    def pause(self):
-        self.videoWidget.pause()
-
-    def stop(self):
-        self.videoWidget.stop()
-
-    def isPlaying(self):
-        return self.videoWidget.player.isPlaying()
-
-
 class DramaSidebar(ScrollArea):
     """Left sidebar for selected drama details"""
 
@@ -540,7 +499,10 @@ class DramaSidebar(ScrollArea):
         self.title.setFont(font)
         self.title.setAlignment(Qt.AlignCenter)
         self.title.setWordWrap(True)
-        self.vBoxlayout.addWidget(self.title)
+        self.title.setMinimumWidth(0)
+        self.title.setMaximumWidth(260)
+        self.title.adjustSize()
+        self.vBoxlayout.addWidget(self.title, 0, Qt.AlignCenter)
 
         # Stats
         stats_layout = QHBoxLayout()
@@ -612,7 +574,7 @@ class DramaSidebar(ScrollArea):
         self.path_edit.setToolTip(text)
 
     def play_video(self):
-        dialog = DramaVideoPlayerDialog(self.window())
+        dialog = VideoPlayerDialog(self.window())
         if not self.current_selected_chapter:
             return
 
@@ -1041,7 +1003,7 @@ class DramaDownloader(QWidget):
                 if btn.isChecked():
                     if i < len(info.get('chapterList', [])):
                         self.sidebar.title.setText(
-                            f"Download {info['chapterList'][i].get('title')}")
+                            f"{info['chapterList'][i].get('title')}")
                         self.sidebar.current_selected_chapter = info['chapterList'][i]
                     break
             self.sidebar.poster.loadImage(
@@ -1064,7 +1026,13 @@ class DramaDownloader(QWidget):
         object_name = self.objectName()
         is_default_object_name = object_name == 'all_drama_downloader'
         for (regex, extractor_class) in REGEX_DRAMA:
-            if re.match(regex, url):
+            netloc = str(urlparse(url).netloc)
+            # match (www.|web.|m.)
+            if netloc.count(".") >= 2 and re.match(r'^(www\.|web\.|m\.)', netloc):
+                netloc = re.sub(r'^(www\.|web\.|m\.)', '', netloc)
+                self.logger.debug(f"netloc: {netloc}, regex: {regex}")
+            if netloc in regex:
+                self.logger.debug(f"Extractor: {extractor_class.__name__}")
                 extractor = extractor_class()
                 break
         if not extractor:
@@ -1227,6 +1195,7 @@ class DramaDownloaderPage(ScrollArea):
         self.kuaishou_downloader: Optional['DramaDownloader'] = None
         self.tiktok_downloader: Optional['DramaDownloader'] = None
         self.youtube_downloader: Optional['DramaDownloader'] = None
+        self.facebook_downloader: Optional['DramaDownloader'] = None
 
         self.dramaboxAction = Action(
             DRAMA_ICONS['dramabox_downloader'], self.tr('Dramabox'), checkable=True)
@@ -1246,11 +1215,14 @@ class DramaDownloaderPage(ScrollArea):
             DRAMA_ICONS['tiktok_downloader'], self.tr('Tiktok'), checkable=True)
         self.youtubeAction = Action(
             DRAMA_ICONS['youtube_downloader'], self.tr('Youtube'), checkable=True)
+        self.facebookAction = Action(
+            DRAMA_ICONS['facebook_downloader'], self.tr('Facebook'), checkable=True)
 
         self.object_name_list = ["dramabox_downloader", "reelshort_downloader",
                                  "dramabite_downloader", "shortmovs_downloader",
                                  "rushshortstv_downloader", "stardusttv_downloader",
-                                 "kuaishou_downloader", "tiktok_downloader", "youtube_downloader"]
+                                 "kuaishou_downloader", "tiktok_downloader", "youtube_downloader",
+                                 "facebook_downloader"]
         self.object_name_dict = {
             "dramabox_downloader": (self.dramabox_downloader, DramaDownloader, self.dramaboxAction),
             "reelshort_downloader": (self.reelshort_downloader, DramaDownloader, self.reelshortAction),
@@ -1261,6 +1233,7 @@ class DramaDownloaderPage(ScrollArea):
             "kuaishou_downloader": (self.kuaishou_downloader, DramaDownloader, self.kuaishouAction),
             "tiktok_downloader": (self.tiktok_downloader, DramaDownloader, self.tiktokAction),
             "youtube_downloader": (self.youtube_downloader, DramaDownloader, self.youtubeAction),
+            "facebook_downloader": (self.facebook_downloader, DramaDownloader, self.facebookAction)
         }
 
         self.dramaboxAction.toggled.connect(
@@ -1281,6 +1254,8 @@ class DramaDownloaderPage(ScrollArea):
             lambda checked: self.on_toggle_add_tab(checked, "tiktok_downloader"))
         self.youtubeAction.toggled.connect(
             lambda checked: self.on_toggle_add_tab(checked, "youtube_downloader"))
+        self.facebookAction.toggled.connect(
+            lambda checked: self.on_toggle_add_tab(checked, "facebook_downloader"))
 
         class AddDropDownButton(TransparentDropDownToolButton):
             def setStyleSheet(self, styleSheet: str, /) -> None:
@@ -1370,8 +1345,9 @@ class DramaDownloaderPage(ScrollArea):
         menu.addSeparator()
         menu.addActions([
             self.youtubeAction,
+            self.facebookAction,
             self.tiktokAction,
-            self.kuaishouAction,
+            self.kuaishouAction
         ])
 
         if pos is not None:

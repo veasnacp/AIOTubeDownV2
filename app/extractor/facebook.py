@@ -40,6 +40,7 @@ class FacebookBaseIE(ExtractorBase):
     _LINK_USER_WITH = "https://web.facebook.com/%s/videos/%s"
     _LINK_USER_REEL_WITH = "https://web.facebook.com/%s/reels/%s"
     _LINK_VIDEO_WITH = "https://web.facebook.com/watch/?v=%s"
+    _CLOUD_FOLDER = "videos/facebook"
 
     _API_GRAPHQL = "https://web.facebook.com/api/graphql/"
 
@@ -83,6 +84,127 @@ class FacebookBaseIE(ExtractorBase):
         return datetime.fromtimestamp(ts) if ts > 0 else "Unknown"
 
     def extract_node(self, node: dict):
+        info = node.get("short_form_video_context", {})
+        video_id = (info.get("video", {}).get("id") or
+                    info.get("playback_video", {}).get("id") or
+                    info.get("id", ""))
+
+        title = info.get("title", "")
+        if not title:
+            owner_name = info.get("video_owner", {}).get("name", "")
+            text = node.get("message", {}).get("text")
+            title = text if text else f"{owner_name} [{video_id}]"
+
+        desc = info.get("description") or title
+
+        thumbnail = (info.get("playback_video", {}).get("thumbnailImage", {}).get("uri") or
+                     info.get("playback_video", {}).get("image", {}).get("uri") or
+                     info.get("video", {}).get("first_frame_thumbnail") or
+                     info.get("thumbnail", ""))
+
+        url_dl = info.get("playback_video", {}).get("videoDeliveryLegacyFields", {}).get(
+            "browser_native_hd_url") or info.get("hd", "")
+        sd = info.get("playback_video", {}).get("videoDeliveryLegacyFields", {}).get(
+            "browser_native_sd_url") or info.get("sd") or url_dl
+
+        music = info.get("music", "")
+
+        url = info.get("url", "")
+        if video_id and not url:
+            url = self._LINK_VIDEO_WITH % video_id
+
+        width = info.get("playback_video", {}).get(
+            "width") or info.get("width", 0)
+        height = info.get("playback_video", {}).get(
+            "height") or info.get("height", 0)
+        resolution = f"{width}x{height}" if width and height else "unknown"
+
+        duration = info.get("playback_video", {}).get("length_in_second")
+        if duration is None:
+            duration_ms = info.get("video", {}).get(
+                "playable_duration_in_ms") or info.get("duration", 0)
+            duration = duration_ms / 1000 if duration_ms > 0 else 0
+
+        if "creation_time" in node:
+            timestamp = node.get("creation_time") or 0
+        else:
+            timestamp = info.get("playback_video", {}).get(
+                "publish_time") or info.get("publish_time") or info.get("timestamp") or 0
+
+        stats = {
+            "view_count": info.get("view_count", 0),
+            "like_count": info.get("like_count", 0),
+            "comment_count": info.get("comment_count", 0),
+            "share_count": info.get("share_count", 0),
+        }
+
+        uploader = info.get("video_owner", {}).get(
+            "name") or info.get("uploader", "")
+        uploader_id = info.get("video_owner", {}).get(
+            "id") or info.get("uploader_id", "")
+        uploader_url = info.get("video_owner", {}).get(
+            "url") or info.get("uploader_url", "")
+
+        info_dict = {
+            "id": video_id,
+            "display_id": video_id,
+            "title": title,
+            "fulltitle": title,
+            "description": desc,
+            "thumbnail": thumbnail,
+            "original_thumbnail": thumbnail,
+            "sd": sd,
+            "hd": url_dl,
+            "music": music,
+            "requested_download": [{
+                "title": title,
+                "width": width,
+                "height": height,
+                "resolution": resolution,
+                "url": url
+            }],
+            "uploader": uploader,
+            "uploader_id": uploader_id,
+            "uploader_url": uploader_url,
+            "url": url,
+            "original_url": url,
+            "webpage_url": url,
+            "dash_manifest_url": info.get("playback_video", {}).get("videoDeliveryLegacyFields", {}).get("dash_manifest_url") or info.get("dash_manifest_url", ""),
+            "webpage_url_domain": "facebook.com",
+            "extractor": "facebook",
+            "extractor_key": "Facebook",
+            "width": width,
+            "height": height,
+            "resolution": resolution,
+            "duration": duration,
+            "timestamp": timestamp,
+            "release_timestamp": timestamp,
+            "upload_date": str(self.datetime_timestamp(timestamp)),
+            **stats,
+            "subtitles": [],
+            "audio_only": [],
+            "video_only": [],
+            "user_info": {
+                "uid": uploader_id,
+                "nickname": uploader,
+                "username": info.get("video_owner", {}).get("delegate_page", {}).get("uri_token") or uploader_id,
+                "avatar": info.get("video_owner", {}).get("displayPicture", {}).get("uri", ""),
+                **info.get("user_info", {})
+            },
+        }
+
+        username = info_dict['user_info'].get('username')
+        if isinstance(username, str) and 'https' in username and '%2F_u%2F' in username:
+            match = re.search(r'%2F_u%2F([^&]+)', username)
+            if match:
+                username = match.group(1) or 'unknown'
+                info_dict['user_info']['username'] = username
+                if not uploader:
+                    info_dict['uploader'] = username
+
+        return info_dict
+
+    def updated_extract_node(self, node: dict):
         video_id = node.get("id", "")
 
         title = node.get("title", "")
@@ -216,7 +338,8 @@ class FacebookExtractor(FacebookBaseIE):
                             "permalink_url") or media.get("url", "")
                         dash_manifest_url = media.get(
                             "dash_manifest_url", "")
-                        duration = media.get("playable_duration_in_ms", 0)
+                        duration = media.get("playable_duration_in_ms") or media.get(
+                            "length_in_second") or 0
                         duration = duration / 1000 if duration > 0 else duration
                         timestamp = media.get("publish_time", "")
 
@@ -288,6 +411,7 @@ class FacebookExtractor(FacebookBaseIE):
                                 "total_comment_count", 0)
                             view_count_feedback = feedback.get(
                                 "video_view_count_renderer", {}).get("feedback", {})
+                            view_count = int(0)
                             if view_count_feedback.get("video_view_count") is not None:
                                 view_count = view_count_feedback.get(
                                     "video_view_count", 0)
@@ -331,7 +455,7 @@ class FacebookExtractor(FacebookBaseIE):
 
         if video_info.get("id") is not None:
             video_id = video_info['id']
-            video_info = self.extract_node(video_info)
+            video_info = self.updated_extract_node(video_info)
             user = video_info["user_info"]
             if len(next_cursor_data_list) > 0:
                 try:
@@ -358,23 +482,34 @@ class FacebookExtractor(FacebookBaseIE):
         if not resp.ok or resp.status_code != 200:
             return None
 
-        return resp.text
+        content = resp.text
+        return content
+
+    async def _get_data_content_from_user(self, url: str) -> Optional[str]:
+        resp = await self.request(url, retries=0)
+        if not isinstance(resp, Response):
+            return None
+        if not resp.ok or resp.status_code != 200:
+            return None
+
+        content = resp.text
+        # self.save_html_text(content, suffix='_user')
+        return content
 
     async def extract_video_list_from_graphql_no_chunks(
         self,
         url_list: list[str],
     ):
         def get_api_video_list(url):
-            video_id = self.get_video_id(url)
             if "&next_data=" in url or "?next_data=" in url:
                 try:
                     next_cursor_data = unquote(
                         url.split('next_data=')[1].split('&')[0])
                     next_cursor_data_list.append(next_cursor_data)
                 except ValueError as err:
-                    print(err)
-                    pass
+                    self.logger.debug(f'error: {err}')
             # video_id = "2052994921749154"
+            url, video_id = self.get_url_video_id(url)
             params = {
                 "av": "0",
                 "__aaid": "0",
@@ -418,21 +553,18 @@ class FacebookExtractor(FacebookBaseIE):
             self.delay_jitter = True
 
         tasks = []
-        valid_url_list = []
         async with semaphore:
             for url in api_url_list:
                 if self.cancel:
                     self.on_extracting({"status": "cancelled"})
                     break
-                url = self.get_video_url(url)
-                valid_url_list.append(url)
                 tasks.append(self._get_data_content_from_api_video(url))
         content_list = await asyncio.gather(*tasks)
 
         video_info_list = []
         error_list = []
         for i, content in enumerate(content_list):
-            url = valid_url_list[i]
+            url = url_list[i]
             if self.cancel:
                 break
             if not isinstance(content, str) or content == "":
@@ -460,18 +592,18 @@ class FacebookExtractor(FacebookBaseIE):
         return await self.extract_video_list_from_graphql_no_chunks(url_list)
 
     async def extract_user_videos_graphql(
-        self, page_id: str, cursor: str, hasMore=False,
+        self, page_id: str,
         limit: Optional[int] = None,
         sort_by: str = "newest",
         content_type: str = "reels",
-        # cursor_continue='',
+        cursor_continue='',
         cursor_position: int = 0,
-        next_cursor=False,
         use_per_next_cursor=False,
     ):
         limit_copy = limit
         count = 0
 
+        cursor = cursor_continue if cursor_continue else ""
         cursor_position = int(cursor_position) if isinstance(cursor_position, int) \
             else int(0)
         use_per_next_cursor = sort_by and sort_by == "newest" and use_per_next_cursor
@@ -479,7 +611,7 @@ class FacebookExtractor(FacebookBaseIE):
         video_info_list = []
         video_list = []
         is_reel = content_type == "shorts" or content_type == "reels"
-        for i in range(1000):
+        for page in itertools.count(1):
             if self.cancel:
                 break
 
@@ -568,10 +700,12 @@ class FacebookExtractor(FacebookBaseIE):
                 continue
 
             if is_reel:
+                self.logger.debug("Extracting videos from reel tab")
                 _content = resp.text
 
                 data = _content.split("{\"label\":\"")[0]
                 data = json.loads(data).get("data")
+
                 _data = _content.replace(
                     "{\"label\":\"", "__aioDLP__{\"label\":\"")
 
@@ -595,12 +729,12 @@ class FacebookExtractor(FacebookBaseIE):
             all_videos = node["aggregated_fb_shorts"] if is_reel else node["all_videos"]
             edege_info_list = all_videos["edges"]
             page_info = all_videos["page_info"]
-            current_cursor = cursor
-            cursor = page_info["end_cursor"]
-            hasMore = page_info["has_next_page"]
+            prev_cursor = cursor
+            next_cursor = page_info["end_cursor"]
+            has_more = page_info["has_next_page"]
 
             # print("########################################")
-            # print("# previous cursor %s" % current_cursor)
+            # print("# previous cursor %s" % prev_cursor)
             # print("# next cursor %s" % cursor)
             # print("########################################")
 
@@ -611,44 +745,47 @@ class FacebookExtractor(FacebookBaseIE):
                     next_cursor_data = _q + ("next_data=%s" % quote(dict_to_query_string({
                         "videoId": video_id,
                         "pageId": page_id,
-                        "cursor": current_cursor,
-                        "next_cursor": page_info["end_cursor"],
+                        "cursor": prev_cursor,
+                        "next_cursor": next_cursor,
                         "cursor_position": cursor_position,
                     })))
                 return next_cursor_data
             # print(cursor, hasMore, count, limit)
-            if is_reel:
-                def edege_get_info(edege_info):
-                    info = edege_info["profile_reel_node"]["node"]
-                    video_id = info["short_form_video_context"]["video"]["id"]
-                    return {"video_id": video_id, "timestamp": info["creation_time"]}
+            # if is_reel:
+                # def edege_get_info(edege_info):
+                #     info = edege_info["profile_reel_node"]["node"]
+                #     video_id = info["short_form_video_context"]["video"]["id"]
+                #     return {"video_id": video_id, "timestamp": info["creation_time"]}
 
-                edege_info_list = [edege_get_info(
-                    info) for info in edege_info_list]
-                _data.sort(key=operator.itemgetter("video_id"))
-                edege_info_list.sort(key=operator.itemgetter("video_id"))
-                # with open("./extractor/test/facebook_test_.json", "w") as f:
-                #   f.write(json.dumps([_data, edege_info_list], indent=2))
+                # edege_info_list = [edege_get_info(
+                #     info) for info in edege_info_list]
+                # _data.sort(key=operator.itemgetter("video_id"))
+                # edege_info_list.sort(key=operator.itemgetter("video_id"))
 
             for i, edege_info in enumerate(edege_info_list):
                 if self.cancel:
                     break
                 if is_reel:
-                    video_id = edege_info["video_id"]
-                    if video_id == _data[i]["video_id"]:
-                        _data[i]["timestamp"] = edege_info["timestamp"]
-                        video_url = _data[i]["url"]
-                        video_url = video_url + next_data(video_url, video_id)
-                        video_list.append(video_url)
-                        video_info_list.append(_data[i])
-                        # print("[THE SAME]", video_id, _data[i]["video_id"])
+                    # video_id = edege_info["video_id"]
+                    video_info = self.extract_node(
+                        edege_info["profile_reel_node"]["node"])
+                    video_info['cursor'] = prev_cursor
+                    video_info['next_cursor'] = next_cursor if has_more else ''
+                    video_info['cursor_position'] = cursor_position
+                    video_info['page_id'] = page_id
+                    video_info_list.append(video_info)
+                    self.on_extracting({
+                        "status": "progress",
+                        "url": video_info["original_url"],
+                        "data": video_info
+                    })
                     count += 1
                 else:
                     info = edege_info["node"]
                     video = info["channel_tab_thumbnail_renderer"]["video"]
                     video_id = video["id"]
                     video_url = self.get_video_url(video_id)
-                    video_url = video_url + next_data(video_url, video_id)
+                    # video_url = video_url + next_data(video_url, video_id)
                     view_count = video["play_count"]
                     publish_time = video["publish_time"]
                     count += 1
@@ -660,15 +797,10 @@ class FacebookExtractor(FacebookBaseIE):
                         "url": video_url
                     })
 
-                if sort_by and sort_by != "newest":
-                    limit_copy = None
-                if not use_per_next_cursor and count == limit_copy:
-                    hasMore = False
-                    break
-
             if not isinstance(limit_copy, int) and use_per_next_cursor:
                 break
 
+            cursor = next_cursor
             cursor_position += 1
 
         if sort_by and sort_by != "newest":
@@ -683,16 +815,8 @@ class FacebookExtractor(FacebookBaseIE):
             video_info_list.sort(key=lambda x: int(
                 x[sort_key]), reverse=reverse)
             video_info_list = video_info_list[0:limit]
-            video_list = [
-                video_info["url"]
-                for video_info in video_info_list
-            ]
-            video_list = video_list[0:limit]
 
-        return {
-            "video_info_list": video_info_list,
-            "video_list": video_list
-        }
+        return video_info_list
 
     async def get_video_info_list_from_user(
         self,
@@ -703,13 +827,14 @@ class FacebookExtractor(FacebookBaseIE):
         cursor_position: int = 0,
         use_per_next_cursor=False,
         content_type: str = "reels",
+        page_id: Optional[str] = None
     ):
         username_id = self.get_user_id(url_uid)
 
-        page_id = None
-        cursor = cursor_continue
-        hasMore = False
-        is_custom_cursor = True if cursor_continue and cursor_continue != "" else False
+        cursor = cursor_continue if cursor_continue else ""
+        has_more = False
+        cursor_position = int(cursor_position) if isinstance(cursor_position, int) \
+            else int(0)
 
         is_reel = False
         if content_type == "shorts" or content_type == "reels":
@@ -718,7 +843,23 @@ class FacebookExtractor(FacebookBaseIE):
             is_reel = True
             content_type = "reels"
 
+        if page_id:
+            try:
+                video_info_list = await self.extract_user_videos_graphql(
+                    page_id, limit, sort_by, content_type, cursor, cursor_position, use_per_next_cursor=use_per_next_cursor
+                )
+                return video_info_list
+            except ValueError as err:
+                self.logger.debug(f"ERROR: {err}")
+                self._on_extracting(
+                    {"error": str(err), "url": url_uid, "status": "error"})
+                return None
+
         try:
+            count = 0
+            limit_copy = limit
+            video_info_list = []
+            video_list = []
             if is_reel:
                 url = self._LINK_USER_REEL_WITH % (username_id, "")
                 if "profile.php?id=" in url_uid:
@@ -732,20 +873,21 @@ class FacebookExtractor(FacebookBaseIE):
                 html = ''
                 retries = 0
                 while True:
+                    if self.cancel:
+                        break
                     if retries == 2:
                         time.sleep(0.2)
 
-                    _resp = await self.request(url, retries=0)
-                    if isinstance(_resp, Response) and _resp.status_code == 200:
-                        html = _resp.text
-                        if '"aggregated_fb_shorts":' in html:
-                            break
-                        else:
-                            retries += 1
+                    _html = await self._get_data_content_from_user(url)
+                    if _html and '"aggregated_fb_shorts":' in _html:
+                        break
+                    else:
+                        retries += 1
 
-                        if retries >= 3:
-                            break
+                    if retries >= 3:
+                        break
 
+                html = _html or html
                 for content in html.split('"collection":'):
                     if '"aggregated_fb_shorts":' in content:
                         entries_obj = parse_js_object(content)
@@ -754,10 +896,28 @@ class FacebookExtractor(FacebookBaseIE):
                                 '"collection":' + content, "collection", 2, '"},"__module_operation_ProfileCometPaginatedAppCollection_timelineAppCollection"') + '"}'
 
                             entries_obj = json.loads(data)
-                        page_id = entries_obj["id"]
                         aggregated = entries_obj["aggregated_fb_shorts"]
-                        cursor = aggregated["page_info"]["end_cursor"]
-                        hasMore = aggregated["page_info"]["has_next_page"]
+                        page_id = entries_obj["id"]
+                        prev_cursor = cursor
+                        next_cursor = aggregated["page_info"]["end_cursor"]
+                        has_more = aggregated["page_info"]["has_next_page"]
+
+                        for edge in aggregated["edges"]:
+                            video_info = self.extract_node(
+                                edge["profile_reel_node"]["node"])
+                            video_info['cursor'] = prev_cursor
+                            video_info['next_cursor'] = next_cursor if has_more else ''
+                            video_info['cursor_position'] = cursor_position
+                            video_info['page_id'] = page_id
+                            video_info_list.append(video_info)
+                            self.on_extracting({
+                                "status": "progress",
+                                "url": url,
+                                "data": video_info
+                            })
+
+                        cursor = next_cursor
+                        cursor_position += 1
 
                         break
 
@@ -769,17 +929,16 @@ class FacebookExtractor(FacebookBaseIE):
                 while True:
                     if retries == 2:
                         time.sleep(0.2)
-                    _resp = await self.request(url, retries=0)
-                    if isinstance(_resp, Response) and _resp.status_code == 200:
-                        html = _resp.text
-                        if '"all_videos":' in html:
-                            break
-                        else:
-                            retries += 1
+                    _html = await self._get_data_content_from_user(url)
+                    if _html and '"all_videos":' in _html:
+                        break
+                    else:
+                        retries += 1
 
-                        if retries >= 3:
-                            break
+                    if retries >= 3:
+                        break
 
+                html = _html or html
                 for content in html.split('"all_videos":'):
                     if "channel_tab_thumbnail_renderer" in content:
                         entries_obj = parse_js_object(content)
@@ -794,23 +953,48 @@ class FacebookExtractor(FacebookBaseIE):
 
                         page_id = owner["owner_as_page"]["id"] if owner.get(
                             "owner_as_page") is not None else owner.get("delegate_page_id", None)
-                        cursor = entries_obj["page_info"]["end_cursor"]
-                        hasMore = entries_obj["page_info"]["has_next_page"]
+                        prev_cursor = cursor
+                        next_cursor = entries_obj["page_info"]["end_cursor"]
+                        has_more = entries_obj["page_info"]["has_next_page"]
+
+                        for edge in edege_info_list:
+                            if self.cancel:
+                                break
+
+                            video_info = self.extract_node(
+                                edge["profile_reel_node"]["node"])
+                            video_info['cursor'] = prev_cursor
+                            video_info['next_cursor'] = next_cursor if has_more else ''
+                            video_info['cursor_position'] = cursor_position
+                            video_info['page_id'] = page_id
+                            video_info_list.append(video_info)
+                            self.on_extracting({
+                                "status": "progress",
+                                "url": url,
+                                "data": video_info
+                            })
+
+                        cursor = next_cursor
+                        cursor_position += 1
 
                         break
 
-            if is_custom_cursor:
-                cursor = cursor_continue
-                is_custom_cursor = False
-            # print(page_id, cursor, hasMore)
+            if not isinstance(limit_copy, int) and use_per_next_cursor:
+                return video_info_list
+
+            if limit_copy and len(video_info_list) >= limit_copy:
+                return video_info_list
+            # print(page_id, cursor, has_more)
             if page_id:
                 video_info_list = await self.extract_user_videos_graphql(
-                    page_id, cursor, hasMore, limit, sort_by, content_type, cursor_position, next_cursor=True, use_per_next_cursor=use_per_next_cursor
+                    page_id, limit, sort_by, content_type, cursor, cursor_position, use_per_next_cursor=use_per_next_cursor
                 )
-
                 return video_info_list
+            else:
+                return None
+
         except ValueError as err:
-            self.logger.error("ERROR: %s" % err)
+            self.logger.debug(f"ERROR: {err}")
             self._on_extracting(
                 {"error": str(err), "url": url_uid, "status": "error"})
 
@@ -818,14 +1002,14 @@ class FacebookExtractor(FacebookBaseIE):
 
     async def test_get_video_info_list_from_user(self):
         self._skip_cached_info = True
-        url = self._LINK_USER_REEL_WITH % 'rinsokreth.page'
+        url = self._LINK_USER_REEL_WITH % ('rinsokreth.page', '')
         self.logger.debug(f"Video URL: {url}")
 
         info_list = await self.get_video_info_list_from_user(url, None, use_per_next_cursor=True)
         if info_list:
-            previous_data = self.load_test_data('_user')
-            if previous_data:
-                info_list = previous_data + info_list
+            # previous_data = self.load_test_data('_user')
+            # if previous_data:
+            #     info_list = previous_data + info_list
             self.logger.debug(f"Total videos: {len(info_list)} video")
             self.save_test_data(info_list, '_user')
         return info_list

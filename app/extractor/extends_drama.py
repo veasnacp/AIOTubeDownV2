@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+# from .douyin import DouyinExtractor as _DouyinExtractor
+from .facebook import FacebookExtractor as _FacebookExtractor
 from .kuaishou import KuaishouExtractor as _KuaishouExtractor
 from .tiktok import TikTokExtractor as _TikTokExtractor
 from .youtube import YouTubeExtractor as _YouTubeExtractor
@@ -60,6 +62,70 @@ class YouTubeExtractor(_YouTubeExtractor):
                 break
         info['chapterList'] = info_list
         self._cache[username] = info
+        return info
+
+    async def download_all_episodes(
+        self,
+        info: Dict[str, Any],
+        output_dir: Optional[str] = None,
+        with_site_name: bool = False,
+        max_attempts: int = 2,
+        # progress_callback: Optional[Callable[["ProgressData"], None]] = None,
+        is_test: bool = False
+    ):
+        pass
+
+
+class FacebookExtractor(_FacebookExtractor):
+    _EXTENDS_NAME = 'facebook'
+
+    def get_drama_id(self, url: str):
+        user_id = self.get_user_id(url)
+        url = self._LINK_USER_REEL_WITH % (user_id, '')
+        return url, user_id
+
+    def get_cover_url(self, info: Dict[str, Any]):
+        return info.get("cover", "")
+
+    def get_video_url_play(self, chapter: Dict[str, Any]):
+        return chapter.get("sd", "")
+
+    async def get_profile_info(
+        self,
+        url: str,
+        limit: int | None = None,
+        sort_by: str = "newest",
+        cursor_continue: str = '',
+        cursor_position: int = 0,
+        use_per_next_cursor: bool = False,
+        content_type: str = "reels"
+    ):
+        info_list = await self.get_video_info_list_from_user(
+            url,
+            limit,
+            sort_by,
+            cursor_continue,
+            cursor_position,
+            use_per_next_cursor,
+            content_type
+        )
+        if not isinstance(info_list, list):
+            self.logger.error(f"[!] ❌ No profile/videos info found")
+            return None
+        if len(info_list) == 0:
+            self.logger.info("[!] ✅ Found 0 videos")
+            return None
+
+        user_id = self.get_user_id(url)
+        info = {}
+        for idx, data in enumerate(info_list):
+            if idx == 0:
+                info.update(data.get('user_info', {}))
+                info['title'] = data.get('uploader', "Unknown")
+                info['cover'] = data.get('thumbnail', "")
+                break
+        info['chapterList'] = info_list
+        self._cache[user_id] = info
         return info
 
     async def download_all_episodes(

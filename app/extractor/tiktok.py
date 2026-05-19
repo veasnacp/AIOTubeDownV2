@@ -305,6 +305,14 @@ class TikTokBaseIE(ExtractorBase):
             "audio_only": [],
             "video_only": video_only,
             "both": both,
+            "http_headers": {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Connection': 'keep-alive',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': f'{self._BASE_URL}/',
+                'Origin': self._BASE_URL,
+            },
             "user_info": {
                 "name": user.get("nickname", ""),
                 **user_info
@@ -453,7 +461,7 @@ class TikTokExtractor(TikTokBaseIE):
             )
             if not isinstance(response, Response):
                 return None
-            self.save_html_text(response.text, "")
+            # self.save_html_text(response.text, "")
             return response.text
 
         web_page = await get_webpage()
@@ -578,7 +586,7 @@ class TikTokExtractor(TikTokBaseIE):
                 r = await self.request(url, retries=0)
                 if not isinstance(r, Response):
                     continue
-                self.save_html_text(r.text, "_user_tikwm")
+                # self.save_html_text(r.text, "_user_tikwm")
                 data = json.loads(r.text)["data"]
                 hasMore = data['hasMore']
                 current_cursor = cursor
@@ -725,7 +733,7 @@ class TikTokExtractor(TikTokBaseIE):
                     await asyncio.sleep(5)
                     continue
 
-                self.save_html_text(r.text, "_user")
+                # self.save_html_text(r.text, "_user")
                 data = json.loads(r.text)
                 has_more = data['hasMorePrevious']
                 prev_cursor = cursor

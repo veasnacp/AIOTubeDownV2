@@ -33,8 +33,8 @@ def test_facebook_extractor():
 
     facebook = FacebookExtractor()
     facebook.set_test_mode(True)
-    asyncio.run(facebook.test_get_video_info_list())
-    # asyncio.run(facebook.test_get_video_info_list_from_user())
+    # asyncio.run(facebook.test_get_video_info_list())
+    asyncio.run(facebook.test_get_video_info_list_from_user())
 
     # info_list = youtube.load_test_data()
     # if info_list:
