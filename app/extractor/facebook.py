@@ -493,7 +493,7 @@ class FacebookExtractor(FacebookBaseIE):
             return None
 
         content = resp.text
-        # self.save_html_text(content, suffix='_user')
+        self.save_html_text(content, suffix='_user')
         return content
 
     async def extract_video_list_from_graphql_no_chunks(
@@ -859,7 +859,6 @@ class FacebookExtractor(FacebookBaseIE):
             count = 0
             limit_copy = limit
             video_info_list = []
-            video_list = []
             if is_reel:
                 url = self._LINK_USER_REEL_WITH % (username_id, "")
                 if "profile.php?id=" in url_uid:
@@ -1002,7 +1001,8 @@ class FacebookExtractor(FacebookBaseIE):
 
     async def test_get_video_info_list_from_user(self):
         self._skip_cached_info = True
-        url = self._LINK_USER_REEL_WITH % ('rinsokreth.page', '')
+        # url = self._LINK_USER_REEL_WITH % ('rinsokreth.page', '')
+        url = "https://web.facebook.com/profile.php?id=61571131041844&sk=reels_tab"
         self.logger.debug(f"Video URL: {url}")
 
         info_list = await self.get_video_info_list_from_user(url, None, use_per_next_cursor=True)

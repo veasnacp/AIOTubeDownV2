@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from PySide6.QtCore import QEvent, Qt, QUrl
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QAbstractButton, QAbstractSlider, QDialog, QWidget
 from PySide6Addons import isDarkTheme
 from PySide6Addons.multimedia import VideoWidget
@@ -19,6 +20,10 @@ class VideoPlayerDialog(QDialog):
                             Qt.WindowType.WindowCloseButtonHint)
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.videoWidget = VideoWidget(self)
+        self.videoWidget.player.positionChanged.connect(
+            self._on_position_changed)
+        self.videoWidget.player.mediaStatusChanged.connect(
+            self._on_media_status_changed)
 
         self.setMinimumWidth(450)
         self.videoWidget.setMinimumWidth(450)
@@ -67,6 +72,14 @@ class VideoPlayerDialog(QDialog):
             self._drag_pos = None
 
         return super().eventFilter(obj, event)
+
+    def _on_position_changed(self, position: int):
+        pass
+
+    def _on_media_status_changed(self, status):
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self.videoWidget.player.setPosition(0)
+            self.videoWidget.player.pause()
 
     def _update_video_geometry(self):
         if not hasattr(self, '_aspect_ratio'):

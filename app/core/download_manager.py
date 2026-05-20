@@ -10,6 +10,7 @@ from typing import Optional
 from loguru import logger
 from PySide6.QtCore import QObject, QThreadPool, Signal, Slot
 
+from ..core.extract_manager import ExtractWorker
 from ..db.database import db
 from .download_worker import DownloadWorker
 
@@ -144,17 +145,36 @@ class DownloadManager(QObject):
         if task:
             options = json.loads(task['metadata_json']
                                  ) if task['metadata_json'] else {}
-            worker = DownloadWorker(
-                task_id, task['url'], task['save_path'], task['filename'], options=options)
-            worker.signals.progress.connect(self.on_worker_progress)
-            worker.signals.status_changed.connect(self.on_worker_status)
-            worker.signals.finished.connect(self.on_worker_finished)
-            worker.signals.error.connect(self.on_worker_error)
-            worker.signals.filename_updated.connect(
-                self.on_worker_filename_updated)
+            extract_worker = ExtractWorker(task_id, [task['url']], options)
+            extract_worker.signals.finished.connect(
+                lambda task_id, data: self._finished_extract_and_resume_task(task_id, data, task, options))
 
-            self.active_workers[task_id] = worker
-            self.thread_pool.start(worker)
+            self.thread_pool.start(extract_worker)
+
+    def _finished_extract_and_resume_task(self, task_id, data, task, options):
+        try:
+            info = data['data'][0]
+        except (IndexError, TypeError) as e:
+            logger.debug(f'Failed to extract info for task {task_id}: {e}')
+            info = None
+
+        if info:
+            url = info.get('url')
+            filename = info.get('title')
+        else:
+            url = task['url']
+            filename = task['filename']
+        worker = DownloadWorker(
+            task_id, url, task['save_path'], filename, options=options)
+        worker.signals.progress.connect(self.on_worker_progress)
+        worker.signals.status_changed.connect(self.on_worker_status)
+        worker.signals.finished.connect(self.on_worker_finished)
+        worker.signals.error.connect(self.on_worker_error)
+        worker.signals.filename_updated.connect(
+            self.on_worker_filename_updated)
+
+        self.active_workers[task_id] = worker
+        self.thread_pool.start(worker)
 
     def redownload_task(self, task_id):
         self.stop_task(task_id)

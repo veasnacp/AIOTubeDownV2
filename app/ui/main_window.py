@@ -136,7 +136,7 @@ class MainWindow(MSFluentWindow):
             icon = FluentIcon.FOLDER.icon(Theme.DARK)
         self.setWindowIcon(icon)
         self.setMinimumSize(800, 540)
-        self.resize(1200, 800)
+        self.resize(1200, 840)
 
         self.titleBarHLayout = self.titleBar.hBoxLayout
 

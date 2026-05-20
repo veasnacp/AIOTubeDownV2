@@ -1,12 +1,9 @@
-import asyncio
-import json
 import os
 import shutil
 import time
 from pathlib import Path
 from typing import Optional
 
-from curl_cffi import requests
 from loguru import logger
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from yt_dlp import YoutubeDL
@@ -20,9 +17,6 @@ except ImportError:
     NodeRunner = None
 
 from ..core.convert_worker import VideoConverter
-
-# from ..extractor._extract import AsyncDouyinExtractor
-from ..extractor.youtube import YouTubeExtractor
 
 
 def populate_yt_dlp_formats(info_dict):
@@ -117,6 +111,7 @@ class DownloadWorker(QRunnable):
         # Determine format based on ffmpeg and user options
         has_ffmpeg = shutil.which("ffmpeg") is not None
         res = self.options.get("resolution", "720")
+        save_thumbnail = self.options.get("thumbnail", False)
 
         # User requested specific high res (1080, 2k, 4k)
         # 2k is height 1440
@@ -157,7 +152,7 @@ class DownloadWorker(QRunnable):
             'format': fmt,
             'outtmpl': outtmpl,
             'progress_hooks': [self.yt_dl_hook_wrapper],
-            'logger': logger,
+            # 'logger': logger,
             'noplaylist': True,
             'merge_output_format': 'mp4' if has_ffmpeg else None,
             'overwrites': True,
@@ -175,7 +170,7 @@ class DownloadWorker(QRunnable):
                     ydl_opts['javascript_runtimes'] = [node_path]
 
         except Exception as e:
-            logger.error(f"NodeRunner not found: {e}")
+            logger.debug(f"NodeRunner not found: {e}")
 
         only_download_audio = self.options.get("mp3", False)
         has_audio_url = False
@@ -193,8 +188,8 @@ class DownloadWorker(QRunnable):
                 if self.info:
                     _info, is_both, video_url, audio_url = self.select_format_for_yt_dlp(
                         int(res))
-                    logger.debug(
-                        f"_info: {_info.get('url')}, is_both: {is_both}, video_url: {video_url}, audio_url: {audio_url}")
+                    # logger.debug(
+                    #     f"_info: {_info.get('url')}, is_both: {is_both}, video_url: {video_url}, audio_url: {audio_url}")
                     video_url = video_url or self.info['url']
                     if only_download_audio:
                         if has_audio_url and audio_url:
@@ -223,6 +218,16 @@ class DownloadWorker(QRunnable):
                     # yt-dlp might merge to mp4 even if requested but prepare_filename might say .webm
                     # Actually ydl.prepare_filename usually reflects the merged extension if download=True succeeded
                     # pass
+                # Save thumbnail if requested
+                if self.info and save_thumbnail and 'thumbnail' in self.info:
+                    try:
+                        thumb_url = self.info['thumbnail']
+                        with YoutubeDL(ydl_opts) as ydl:
+                            ydl.download(thumb_url)
+                        logger.info(
+                            f'Thumbnail saved to {Path(final_path).parent}')
+                    except Exception as e:
+                        logger.error(f'Failed to save thumbnail: {e}')
 
                 self.filename = os.path.basename(final_path)
                 self.signals.filename_updated.emit(self.task_id, self.filename)

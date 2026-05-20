@@ -76,6 +76,7 @@ from ..extractor.extends_drama import (
     YouTubeExtractor,
 )
 from ..theme import Colors, DarkMode, LightMode
+from ..utils.validation import is_valid_url
 
 TYPE_DRAMA_EXTRACTOR: TypeAlias = Optional[Union[
     'DramaExtractorBase',
@@ -330,13 +331,13 @@ class ImageLoadTask(QRunnable):
 
 
 class ImageLoaderLabel(QLabel):
-    """Robust image label that loads content in a background thread"""
+    """Robust image label that loads content in a background thread and fits aspect ratio perfectly"""
 
     def __init__(self, text_placeholder="No Image", parent=None):
         super().__init__(parent)
         self.text_placeholder = text_placeholder
         self.placeholder_path = "path/to/your/placeholder.png"
-        self.radius = 12
+        self.radius = 12 + 6
         self.setAlignment(Qt.AlignCenter)
         self._cache = {}  # url -> QPixmap
 
@@ -351,9 +352,6 @@ class ImageLoaderLabel(QLabel):
 
         if self.hash_url(url_str) in self._cache:
             pixmap = self._cache[self.hash_url(url_str)]
-            if self.hasScaledContents():
-                pixmap = pixmap.scaled(
-                    self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.setPixmap(pixmap)
             return
 
@@ -366,15 +364,9 @@ class ImageLoaderLabel(QLabel):
         """Runs in main thread: converts QImage to QPixmap and displays it"""
         pixmap = QPixmap.fromImage(image)
         if not pixmap.isNull():
-            # Respect scaling if set
-            if self.hasScaledContents():
-                pixmap = pixmap.scaled(
-                    self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
             rounded_pixmap = self._get_rounded_pixmap(pixmap, self.radius)
             self.setPixmap(rounded_pixmap)
             self._cache[self.hash_url(self.task.url)] = rounded_pixmap
-
         else:
             self._set_placeholder()
 
@@ -384,9 +376,25 @@ class ImageLoaderLabel(QLabel):
         self._set_placeholder()
 
     def _get_rounded_pixmap(self, pixmap, radius):
-        """Crops a pixmap to have rounded corners"""
-        size = pixmap.size()
-        rounded = QPixmap(size)
+        """Scales the pixmap to fill target size maintaining aspect ratio (Aspect Fill) and applies rounded corners"""
+        target_size = self.size()
+        if target_size.width() <= 0 or target_size.height() <= 0:
+            target_size = QSize(270, 360)
+
+        # Scale keeping aspect ratio by expanding to cover the target size
+        scaled = pixmap.scaled(
+            target_size,
+            Qt.KeepAspectRatioByExpanding,
+            Qt.SmoothTransformation
+        )
+
+        # Center crop the scaled pixmap to the target size
+        x = (scaled.width() - target_size.width()) // 2
+        y = (scaled.height() - target_size.height()) // 2
+        cropped = scaled.copy(x, y, target_size.width(), target_size.height())
+
+        # Render rounded corners
+        rounded = QPixmap(target_size)
         rounded.fill(Qt.transparent)
 
         painter = QPainter(rounded)
@@ -394,20 +402,21 @@ class ImageLoaderLabel(QLabel):
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
         path = QPainterPath()
-        path.addRoundedRect(0, 0, size.width(), size.height(), radius, radius)
+        path.addRoundedRect(0, 0, target_size.width(),
+                            target_size.height(), radius, radius)
         painter.setClipPath(path)
-        painter.drawPixmap(0, 0, pixmap)
+        painter.drawPixmap(0, 0, cropped)
         painter.end()
+
         return rounded
 
     def _set_placeholder(self):
         """Sets the label to the local placeholder or text"""
         placeholder = QPixmap(self.placeholder_path)
         if not placeholder.isNull():
-            if self.hasScaledContents():
-                placeholder = placeholder.scaled(
-                    self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.setPixmap(self._get_rounded_pixmap(placeholder, self.radius))
+            rounded_placeholder = self._get_rounded_pixmap(
+                placeholder, self.radius)
+            self.setPixmap(rounded_placeholder)
         else:
             self.setText(self.text_placeholder)
 
@@ -479,17 +488,28 @@ class DramaSidebar(ScrollArea):
 
         # Large Poster
         self.poster = ImageLoaderLabel("Drama Poster", self)
-        self.poster.setFixedSize(270, 380)
-        self.poster.setScaledContents(True)
+        # Perfect 3:4 Aspect Ratio (270x360)
+        self.poster.setFixedSize(270, 360)
+        # Let center-cropped Aspect Fill render beautifully
+        self.poster.setScaledContents(False)
         self.poster.setAlignment(Qt.AlignCenter)
         self.poster._set_placeholder()
+        self.poster_border_color = LightMode.primary
         self.poster.setStyleSheet(
-            f"border-radius: 12px; background-color: {Colors.alpha(Colors.gray_6, 0.4)}; font-size: 20px; font-weight: bold; color: gray; border: 2px solid {LightMode.primary};")
+            f"border-radius: 12px; background-color: {Colors.alpha(Colors.gray_6, 0.4)}; font-size: 20px; font-weight: bold; color: gray; border: 2px solid {self.poster_border_color};")
         self.vBoxlayout.addWidget(self.poster, 0, Qt.AlignCenter)
 
         self.play_btn = PrimaryPushButton("Play", self)
         self.play_btn.hide()
         self.vBoxlayout.addWidget(self.play_btn)
+
+        # Scroll area to handle long titles
+        self.title_scroll = ScrollArea(self)
+        self.title_scroll.setWidgetResizable(True)
+        self.title_scroll.setFixedHeight(50)  # Enough for 2 lines
+        self.title_scroll.setStyleSheet("border: none;")
+        self.title_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.title_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         # Drama Info
         self.title = BodyLabel("Drama Title", self)
@@ -499,19 +519,54 @@ class DramaSidebar(ScrollArea):
         self.title.setFont(font)
         self.title.setAlignment(Qt.AlignCenter)
         self.title.setWordWrap(True)
-        self.title.setMinimumWidth(0)
+        self.title.setMinimumWidth(self.poster.width() - 10)
         self.title.setMaximumWidth(260)
         self.title.adjustSize()
-        self.vBoxlayout.addWidget(self.title, 0, Qt.AlignCenter)
+        self.title_scroll.setWidget(self.title)
+        self.vBoxlayout.addWidget(self.title_scroll, 0, Qt.AlignCenter)
+        self.vBoxlayout.addStretch()
 
         # Stats
         stats_layout = QHBoxLayout()
-        self.ep_count = BodyLabel("0\nEPs", self)
+        stats_layout.setContentsMargins(0, 0, 0, 0)
+        # EPs Count Widget Container with 8px radius and dashed border
+        self.ep_widget = QWidget(self)
+        self.ep_widget.setObjectName("epWidget")
+        self.ep_widget.setFixedHeight(50)
+        self.ep_widget.setAttribute(Qt.WA_StyledBackground, True)
+        self.ep_widget.setStyleSheet(
+            f"#epWidget {{ border: 2px dashed {Colors.alpha(self.poster_border_color, 0.7)}; border-radius: 8px; background-color: {Colors.alpha(Colors.gray_6, 0.15)}; }}"
+        )
+        self.ep_widget_layout = QVBoxLayout(self.ep_widget)
+        self.ep_widget_layout.setContentsMargins(5, 8, 5, 8)
+        self.ep_widget_layout.setSpacing(0)
+
+        self.ep_count = BodyLabel("0\nEPs", self.ep_widget)
         self.ep_count.setAlignment(Qt.AlignCenter)
-        self.selected_count = BodyLabel("0\nSelected", self)
+        self.ep_count.setStyleSheet(self.ep_count.styleSheet(
+        ) + "BodyLabel{border: none; background: transparent;}")
+        self.ep_widget_layout.addWidget(self.ep_count)
+
+        # Selected Count Widget Container with 8px radius and dashed border
+        self.selected_widget = QWidget(self)
+        self.selected_widget.setObjectName("selectedWidget")
+        self.selected_widget.setFixedHeight(50)
+        self.selected_widget.setAttribute(Qt.WA_StyledBackground, True)
+        self.selected_widget.setStyleSheet(
+            f"#selectedWidget {{ border: 2px dashed {Colors.alpha(self.poster_border_color, 0.7)}; border-radius: 8px; background-color: {Colors.alpha(Colors.gray_6, 0.15)}; }}"
+        )
+        self.selected_widget_layout = QVBoxLayout(self.selected_widget)
+        self.selected_widget_layout.setContentsMargins(5, 8, 5, 8)
+        self.selected_widget_layout.setSpacing(0)
+
+        self.selected_count = BodyLabel("0\nSelected", self.selected_widget)
         self.selected_count.setAlignment(Qt.AlignCenter)
-        stats_layout.addWidget(self.ep_count)
-        stats_layout.addWidget(self.selected_count)
+        self.selected_count.setStyleSheet(
+            self.selected_count.styleSheet() + "BodyLabel{border: none; background: transparent;}")
+        self.selected_widget_layout.addWidget(self.selected_count)
+
+        stats_layout.addWidget(self.ep_widget)
+        stats_layout.addWidget(self.selected_widget)
         self.vBoxlayout.addLayout(stats_layout, 1)
 
         self.info: dict = {}
@@ -804,6 +859,8 @@ class DramaDownloader(QWidget):
         self.url_edit = LineEdit(self.search_widget)
         self.url_edit.setPlaceholderText(
             f"Paste {object_name.split('_')[0].capitalize()} Page or Episode URL...")
+        # bind enter key to scrape button
+        self.url_edit.returnPressed.connect(self.scrape_episode)
         self.scrape_btn = PrimaryPushButton(FluentIcon.SEARCH, "Scrape", self)
         self.scrape_btn.clicked.connect(self.scrape_episode)
         self.search_layout.addWidget(self.url_edit)
@@ -889,6 +946,8 @@ class DramaDownloader(QWidget):
             level="INFO",
             format="[{time:HH:mm:ss}] {message}",
         )
+        self.clear_btn.clicked.connect(
+            lambda: self.log_output.setPlainText(""))
         # self.sink_id = self.logger.add(
         #     self.log_output.append,
         #     level="DEBUG",
@@ -1018,6 +1077,12 @@ class DramaDownloader(QWidget):
 
     def scrape_episode(self):
         url = self.url_edit.text()
+        if not url:
+            self.logger.error("[!] ❌ URL is empty")
+            return
+        if not is_valid_url(url):
+            self.logger.error("[!] ❌ Invalid URL")
+            return
         self._get_drama_info(url)
 
     def _get_drama_info(self, url: str):
@@ -1069,7 +1134,6 @@ class DramaDownloader(QWidget):
 
         info_key = extractor_name + '-' + drama_id
         info = CACHE_DRAMA.get(info_key)
-
         self.toggle_all_episodes('deselect')
 
         self.sidebar.extractor = extractor
@@ -1152,6 +1216,14 @@ class DramaDownloader(QWidget):
         self.logger.error(f"Scrape error: {error_msg}")
 
 
+class TabBarComponent(TabBar):
+    def _swapItem(self, index: int):
+        oldIndex = self.currentIndex()
+        if (index == 0 and oldIndex == 1) or (index == 1 and oldIndex == 0):
+            return
+        return super()._swapItem(index)
+
+
 class DramaDownloaderPage(ScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -1167,7 +1239,7 @@ class DramaDownloaderPage(ScrollArea):
         self.tabBarLayout.setContentsMargins(0, 0, 0, 0)
         self.tabBarLayout.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.tabBar = TabBar(self.tabBarWidget)
+        self.tabBar = TabBarComponent(self.tabBarWidget)
         self.tabBar.setTabSelectedBackgroundColor(
             Colors.qt_alpha(LightMode.primary, 0.8), Colors.qt_alpha(DarkMode.primary, 0.5))
         self.tabBar.setMovable(True)
@@ -1180,6 +1252,7 @@ class DramaDownloaderPage(ScrollArea):
             self.tabBar)
 
         self.tabBar.tabCloseRequested.connect(self.removeTab)
+        self.tabBar.tabMoved.connect(self.onTabMoved)
 
         self.stackedWidget = QStackedWidget(self)
 
@@ -1414,3 +1487,6 @@ class DramaDownloaderPage(ScrollArea):
         if not widget:
             return
         widget.deleteLater()
+
+    def onTabMoved(self, from_index, to_index):
+        pass

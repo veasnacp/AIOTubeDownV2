@@ -150,6 +150,11 @@ class AddUrlDialog(MessageBoxBase):
         self.viewLayout.setSpacing(10)
         self.viewLayout.setContentsMargins(10, 10, 10, 10)
 
+        # update loater, now hidden
+        self.count_spin.hide()
+        self.cat_combo.hide()
+        self.provider_combo.hide()
+
         self._update_stats()
         window_width = self.window().width()
         if window_width < 1000:
@@ -207,6 +212,7 @@ class AddUrlDialog(MessageBoxBase):
             "resolution": res_map.get(self.res_combo.currentIndex(), "720"),
             "mp3": self.cb_mp3.isChecked(),
             "thumbnail": self.cb_thumbnail.isChecked(),
+            "engine": self.provider_combo.currentText(),
             "with_site": self.cb_site_folder.isChecked(),
             "with_username": self.cb_user_folder.isChecked()
         }
