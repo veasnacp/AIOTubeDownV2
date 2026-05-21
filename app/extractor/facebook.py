@@ -11,10 +11,13 @@ import string
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from urllib.parse import quote, unquote, urlparse
+from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import quote, unquote, unquote_plus, urlparse
 
 from curl_cffi.requests import BrowserTypeLiteral, Response
+from yt_dlp import YoutubeDL
+from yt_dlp.compat import compat_etree_fromstring
+from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import extract_attributes, find_element, require, traverse_obj
 
 try:
@@ -29,9 +32,12 @@ from ._request import (
     generate_url_query,
     get_content_from_html_selector,
     get_json_from_html,
+    search_dict,
 )
 
 current_dir = Path(__file__).parent
+
+info_extractor = InfoExtractor(downloader=YoutubeDL())
 
 
 class FacebookBaseIE(ExtractorBase):
@@ -92,20 +98,51 @@ class FacebookBaseIE(ExtractorBase):
         title = info.get("title", "")
         if not title:
             owner_name = info.get("video_owner", {}).get("name", "")
-            text = node.get("message", {}).get("text")
+            message = node.get("message") or {}
+            text = message.get("text")
             title = text if text else f"{owner_name} [{video_id}]"
 
         desc = info.get("description") or title
 
-        thumbnail = (info.get("playback_video", {}).get("thumbnailImage", {}).get("uri") or
-                     info.get("playback_video", {}).get("image", {}).get("uri") or
-                     info.get("video", {}).get("first_frame_thumbnail") or
+        playback_video = info.get("playback_video") or {}
+        video = info.get("video") or {}
+        thumbnail = (playback_video.get("thumbnailImage", {}).get("uri") or
+                     playback_video.get("image", {}).get("uri") or
+                     video.get("first_frame_thumbnail") or
                      info.get("thumbnail", ""))
 
-        url_dl = info.get("playback_video", {}).get("videoDeliveryLegacyFields", {}).get(
-            "browser_native_hd_url") or info.get("hd", "")
-        sd = info.get("playback_video", {}).get("videoDeliveryLegacyFields", {}).get(
-            "browser_native_sd_url") or info.get("sd") or url_dl
+        dash_manifest_url = ""
+        dash_manifest = None
+        if "videoDeliveryLegacyFields" in playback_video:
+            videoDeliveryLegacyFields = playback_video.get(
+                "videoDeliveryLegacyFields", {})
+            url_dl = videoDeliveryLegacyFields.get(
+                "browser_native_hd_url") or info.get("hd", "")
+            sd = videoDeliveryLegacyFields.get(
+                "browser_native_sd_url") or info.get("sd") or url_dl
+
+            dash_manifest_url = videoDeliveryLegacyFields.get(
+                "dash_manifest_url", "")
+            dash_manifest = videoDeliveryLegacyFields.get(
+                "dash_manifest_xml_string", None)
+        else:
+            url_dl = playback_video.get(
+                "browser_native_hd_url") or info.get("hd", "")
+            sd = playback_video.get(
+                "browser_native_sd_url") or info.get("sd") or url_dl
+
+            dash_manifest_url = playback_video.get("dash_manifest_url", "")
+            dash_manifest = playback_video.get("dash_manifest", None)
+
+        both = []
+        if dash_manifest:
+            try:
+                both = info_extractor._parse_mpd_formats(
+                    compat_etree_fromstring(unquote_plus(dash_manifest)),
+                    mpd_url=None)
+            except Exception as e:
+                self.logger.debug(f'Error parsing dash_manifest: {e}')
+                both = []
 
         music = info.get("music", "")
 
@@ -113,13 +150,13 @@ class FacebookBaseIE(ExtractorBase):
         if video_id and not url:
             url = self._LINK_VIDEO_WITH % video_id
 
-        width = info.get("playback_video", {}).get(
+        width = playback_video.get(
             "width") or info.get("width", 0)
-        height = info.get("playback_video", {}).get(
+        height = playback_video.get(
             "height") or info.get("height", 0)
         resolution = f"{width}x{height}" if width and height else "unknown"
 
-        duration = info.get("playback_video", {}).get("length_in_second")
+        duration = playback_video.get("length_in_second")
         if duration is None:
             duration_ms = info.get("video", {}).get(
                 "playable_duration_in_ms") or info.get("duration", 0)
@@ -128,7 +165,7 @@ class FacebookBaseIE(ExtractorBase):
         if "creation_time" in node:
             timestamp = node.get("creation_time") or 0
         else:
-            timestamp = info.get("playback_video", {}).get(
+            timestamp = playback_video.get(
                 "publish_time") or info.get("publish_time") or info.get("timestamp") or 0
 
         stats = {
@@ -169,7 +206,7 @@ class FacebookBaseIE(ExtractorBase):
             "url": url,
             "original_url": url,
             "webpage_url": url,
-            "dash_manifest_url": info.get("playback_video", {}).get("videoDeliveryLegacyFields", {}).get("dash_manifest_url") or info.get("dash_manifest_url", ""),
+            "dash_manifest_url": dash_manifest_url,
             "webpage_url_domain": "facebook.com",
             "extractor": "facebook",
             "extractor_key": "Facebook",
@@ -184,6 +221,7 @@ class FacebookBaseIE(ExtractorBase):
             "subtitles": [],
             "audio_only": [],
             "video_only": [],
+            "both": both,
             "user_info": {
                 "uid": uploader_id,
                 "nickname": uploader,
@@ -299,6 +337,56 @@ class FacebookBaseIE(ExtractorBase):
                 self.datetime_timestamp(info_dict["timestamp"]))
 
         return info_dict
+
+    def extract_node_from_user(
+        self,
+        text_multiple_json: str,
+        callback: Optional[Callable[[dict, dict, list], None]] = None
+    ):
+        video_info_list = []
+        for line in text_multiple_json.strip().split('\n'):
+            cleaned_line = line.strip()
+            if not cleaned_line:
+                continue
+            try:
+                parsed_obj = json.loads(cleaned_line)
+                if 'data' in parsed_obj and '"aggregated_fb_shorts":' in cleaned_line:
+                    edges = parsed_obj["data"]["node"]["aggregated_fb_shorts"]["edges"]
+                    for item in edges:
+                        try:
+                            node = item["profile_reel_node"]["node"]
+                            info_dict = self.extract_node(node)
+                            node_id = node.get("id") or ""
+                            info_dict["node_id"] = node_id
+                            self.logger.debug(f"Extract node_id: {node_id}")
+                        except Exception as e:
+                            self.logger.debug(f"Error item parsing JSON: {e}")
+                            continue
+                        # if callable(callback):
+                        #     callback(info_dict, node, edges)
+                        video_info_list.append(info_dict)
+
+                elif len(video_info_list) > 0 and 'data' in parsed_obj and 'label' in parsed_obj and "defer$FBReelsFeedbackBar_feedback" in parsed_obj['label']:
+                    data = parsed_obj.get('data') or {}
+                    node_id = data.get("id", "")
+                    feedback = data.get('feedback') or {}
+                    if "unified_reactors" in feedback:
+                        stats = {
+                            "like_count": int(feedback['unified_reactors'].get('count', 0)),
+                            "view_count": int(feedback.get('view_count', 0)),
+                            "comment_count": int(feedback.get('total_comment_count', 0)),
+                            # string number to int
+                            "share_count": int(float(feedback.get('share_count_reduced', 0))),
+                        }
+                        for video in video_info_list:
+                            if video.get("node_id") == node_id:
+                                video.update(stats)
+                                break
+
+            except Exception as e:
+                self.logger.debug(f"Error parsing JSON: {e}")
+
+        return video_info_list
 
 
 class FacebookExtractor(FacebookBaseIE):
@@ -591,7 +679,7 @@ class FacebookExtractor(FacebookBaseIE):
     async def get_video_info_list(self, url_list: List[str]) -> List[Dict[str, Any]]:
         return await self.extract_video_list_from_graphql_no_chunks(url_list)
 
-    async def extract_user_videos_graphql(
+    async def extract_user_videos_graphql_v1(
         self, page_id: str,
         limit: Optional[int] = None,
         sort_by: str = "newest",
@@ -689,15 +777,16 @@ class FacebookExtractor(FacebookBaseIE):
             headers = {
                 # 'user-agent': random_user_agent(),
                 # 'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'accept': '*/*',
-                'content-type': 'application/json',
-                'accept-language': 'en-us,en;q=0.5',
+                'Accept': '*/*',
+                'Content-Type': 'application/json',
+                'Accept-Language': 'en-us,en;q=0.5',
                 # 'sec-fetch-mode': 'navigate',
             }
             resp = await self.request(api_user, "POST", headers=headers)
             if not isinstance(resp, Response):
-                self.logger.debug("Failed to get response from %s", api_user)
+                self.logger.debug(f"Failed to get response from {api_user}")
                 continue
+            self.logger.debug(f"Status: {resp.status_code}")
 
             if is_reel:
                 self.logger.debug("Extracting videos from reel tab")
@@ -818,6 +907,159 @@ class FacebookExtractor(FacebookBaseIE):
 
         return video_info_list
 
+    async def extract_user_videos_graphql(
+        self, page_id: str,
+        limit: Optional[int] = None,
+        sort_by: str = "newest",
+        content_type: str = "reels",
+        cursor_continue='',
+        cursor_position: int = 0,
+        use_per_next_cursor=False,
+    ):
+        limit_copy = limit
+        count = 0
+
+        cursor = cursor_continue if cursor_continue else ""
+        cursor_position = int(cursor_position) if isinstance(cursor_position, int) \
+            else int(0)
+        use_per_next_cursor = sort_by and sort_by == "newest" and use_per_next_cursor
+
+        video_info_list = []
+        is_reel = content_type == "shorts" or content_type == "reels"
+        for page in itertools.count(1):
+            if self.cancel:
+                break
+
+            if limit_copy and len(video_info_list) >= limit_copy:
+                break
+
+            if is_reel:
+                id = page_id
+                params = {
+                    "av": "0",
+                    "__user": "0",
+                    "__a": "1",
+                    "__req": "19",
+                    "__hs": "19667.HYP:comet_loggedout_pkg.2.1..0.0",
+                    "dpr": "1",
+                    "__ccg": "GOOD",
+                    "__rev": "1009706363",
+                    "__s": "flisna:tkajno:wlh9rg",
+                    "__hsi": "7298246105608153253",
+                    "__dyn": "7xeUmxa13xu1syaxG4VuC2-m1FwAxu13wsoKbgS3q5UObwNwnof8boG0x8bo6u3y4o11U1lVE4W0om78bbwto2awgolzUO0-E4a3a4oaEd82lwv89k2C1Fwc60D8vwRwlE-U2exi4UaEW2a1VwwwJK2W5olwSU5nxmu3W0GpovUy0_o98bodEGdwda3e0Lo4q58jwTwNwLwFg661pwkoqwqo4eE7W",
+                    "__csr": "n0EiOslfdnkdRZcFfB8qRmWJZeAFPKgB6BBjWZcyiBDVpWn9z7V8CBV6FGzqgjAHlzoOiFQUVeXQWAKE9rHBhopBxCmVptfBiXrxt5AKmFGyoyVFFJ2ahUVau8AV9GAyESVoCuFUSEyexl0PVXzAp1q58lyembz9XUhgO2WayouQ4bwbuu4U1w818o14t0k82iwefwcK0EWw2mE0rtw3482pwno6uEig0Dypm0bsw1Be0zzat2IM1kEaQ5o1v81d807PK1-w42U0djo5J0c0hy40jC15Bw8x1K5A2-7U5K3y2509G5VUrG221FwXa-09rwuE3eioC2Hul0go1cJ0m40i9049yo2ZDUdE27U5K9zkiq1lyFEG0uW5pU4W13N03_OBBArOa0QU3ilEJa4d1JwbvoSjja0K81RUNo2fa3pxC5U550bl05pxqE5Wa8A0CEhPwqo4y4A0E82M8K8m84Km3BwgU6GawGxaq11dCgcO0Bw4_xqu9wjUfosIJ0uodxXgGlwaIaA7NxwG0WEdo7lG2AweUkw0D8DQu0ugE7W0BE4i1AxK9xi7Uy0gm1PEEig2KwYDUcax91ngcm0TE0h5wm812QawVw8216KU17EIjpU9QeKEi1k2u0x4jwrEf8jAxnw8G1OxGt0WwXwNxe5u0pa0Fo9pZw-x208HOy86KEiCV9V910cKm5E2Kw4zxng6o8rhEpwgUlPwmA0J839wYwbeeQ2e",
+                    "__comet_req": "15",
+                    "lsd": "AVq-WJbAcrY",
+                    "jazoest": "2935",
+                    "__aaid": "0",
+                    "__spin_r": "1009706363",
+                    "__spin_b": "trunk",
+                    "__spin_t": "1699255338",
+                    "fb_api_caller_class": "RelayModern",
+                    "fb_api_req_friendly_name": "ProfileCometAppCollectionReelsRendererPaginationQuery",
+                    "variables": dict_to_query_string({
+                        "UFI2CommentsProvider_commentsKey": "ProfileCometCollectionRootQuery",
+                        "count": 10, "cursor": cursor,
+                        "displayCommentsContextEnableComment": True, "displayCommentsContextIsAdPreview": False, "displayCommentsContextIsAggregatedShare": False, "displayCommentsContextIsStorySet": False,
+                        "displayCommentsFeedbackContext": None,
+                        "feedLocation": "COMET_MEDIA_VIEWER",
+                        "feedbackSource": 65, "focusCommentID": None,
+                        "renderLocation": None, "scale": 1,
+                        "useDefaultActor": "true", "id": id
+                    }),
+                    "server_timestamps": "true",
+                    "doc_id": "6791512760969319"
+                }
+            else:
+                params = {
+                    "av": "0",
+                    "__user": "0",
+                    "__a": "1",
+                    "__req": "1f",
+                    "__hs": "19632.HYP:comet_loggedout_pkg.2.1..0.0",
+                    "dpr": "2",
+                    "__ccg": "GOOD",
+                    "fb_api_caller_class": "RelayModern",
+                    "fb_api_req_friendly_name": "PagesCometChannelTabAllVideosCardImplPaginationQuery",
+                    "variables": dict_to_query_string({
+                        "alwaysIncludeAudioRooms": "true",
+                        "count": 6,
+                        "cursor": cursor,
+                        "pageID": page_id,
+                        "scale": 8,
+                        "showReactions": "true",
+                        "useDefaultActor": "false",
+                        "id": page_id,
+                    }),
+                    "server_timestamps": "true",
+                    "doc_id": "6557211744354341"
+                }
+
+            api_user = generate_url_query(self._API_GRAPHQL, params)
+            headers = {
+                'Accept': '*/*',
+                'Content-Type': 'application/json',
+                'Accept-Language': 'en-us,en;q=0.5',
+            }
+            resp = await self.request(api_user, "POST", headers=headers)
+            if not isinstance(resp, Response):
+                self.logger.debug(f"Failed to get response from {api_user}")
+                continue
+            self.logger.debug(f"Status: {resp.status_code}")
+
+            if is_reel:
+                self.logger.debug("Extracting videos from reel tab")
+                content = resp.text
+
+                def callback_func(info_dict, node, edges, cursor, cursor_position, page_id):
+                    page_info = edges["page_info"]
+                    prev_cursor = cursor
+                    next_cursor = page_info["end_cursor"]
+                    has_more = page_info["has_next_page"]
+
+                    info_dict['cursor'] = prev_cursor
+                    info_dict['next_cursor'] = next_cursor if has_more else ''
+                    info_dict['cursor_position'] = cursor_position
+                    info_dict['page_id'] = page_id
+
+                    self.on_extracting({
+                        "status": "progress",
+                        "url": info_dict["original_url"],
+                        "data": info_dict
+                    })
+
+                    video_info_list.append(info_dict)
+
+                    cursor = next_cursor
+
+                self.extract_node_from_user(
+                    content,
+                    lambda info_dict, node, edges: callback_func(
+                        info_dict, node, edges,
+                        cursor, cursor_position, page_id
+                    )
+                )
+
+            if not isinstance(limit_copy, int) and use_per_next_cursor:
+                break
+
+            cursor_position += 1
+
+        if sort_by and sort_by != "newest":
+            limit = limit if isinstance(
+                limit, int) and limit != 0 else len(video_info_list)
+            if sort_by == "popular":
+                sort_key = "view_count"
+                reverse = True
+            else:
+                sort_key = "create_time"
+                reverse = False
+            video_info_list.sort(key=lambda x: int(
+                x[sort_key]), reverse=reverse)
+            video_info_list = video_info_list[0:limit]
+
+        return video_info_list
+
     async def get_video_info_list_from_user(
         self,
         url_uid: str,
@@ -843,8 +1085,20 @@ class FacebookExtractor(FacebookBaseIE):
             is_reel = True
             content_type = "reels"
 
+        async def get_redirect_url(_url):
+            _url = self._LINK_USER_REEL_WITH % (username_id, "")
+            if "profile.php?id=" in url_uid:
+                _url = "https://web.facebook.com/profile.php?id=%s&%s" % (
+                    username_id, "sk=reels_tab")
+                final_response = await self.request(_url, retries=0)
+                if isinstance(final_response, Response):
+                    _url = final_response.url
+            return _url
+
         if page_id:
             try:
+                if is_reel:
+                    url = await get_redirect_url(url_uid)
                 video_info_list = await self.extract_user_videos_graphql(
                     page_id, limit, sort_by, content_type, cursor, cursor_position, use_per_next_cursor=use_per_next_cursor
                 )
@@ -860,15 +1114,10 @@ class FacebookExtractor(FacebookBaseIE):
             limit_copy = limit
             video_info_list = []
             if is_reel:
-                url = self._LINK_USER_REEL_WITH % (username_id, "")
-                if "profile.php?id=" in url_uid:
-                    url = "https://web.facebook.com/profile.php?id=%s&%s" % (
-                        username_id, "sk=reels_tab")
-                    final_response = await self.request(url, retries=0)
-                    if isinstance(final_response, Response):
-                        url = final_response.url
+                url = await get_redirect_url(url_uid)
 
-                self.logger.debug("Goto URL Reel Tab: %s" % url)
+                self.logger.debug(f"Goto URL Reel Tab: {url}")
+                self.logger.debug(f"Cookie: {self.session.cookies.get_dict()}")
                 html = ''
                 retries = 0
                 while True:
@@ -1002,14 +1251,24 @@ class FacebookExtractor(FacebookBaseIE):
     async def test_get_video_info_list_from_user(self):
         self._skip_cached_info = True
         # url = self._LINK_USER_REEL_WITH % ('rinsokreth.page', '')
-        url = "https://web.facebook.com/profile.php?id=61571131041844&sk=reels_tab"
+        url = "https://web.facebook.com/profile.php?id=61585441798001&sk=reels_tab"
         self.logger.debug(f"Video URL: {url}")
 
-        info_list = await self.get_video_info_list_from_user(url, None, use_per_next_cursor=True)
+        with open(current_dir / '_data' / '__facebook_data_user_graphql_test.txt', "r", encoding="utf-8") as file:
+            text_node = file.read()
+
+        # info_list = self.extract_node_from_user(text_node)
+        # if info_list:
+        #     self.logger.debug(f"Total Video: {len(info_list)}")
+        #     self.save_test_data(info_list, '_user_from_graphql')
+
+        info_list = await self.get_video_info_list_from_user(url, None, cursor_continue="AQHSGo6i3C5rF_0SYK9hwda_tC7TzL9A02KSOt5QPX675U4UWGpbQJwR_bYvszYgoLVXLt_cOVC_Uia9aQw9DxV9Qw", cursor_position=1, page_id="YXBwX2NvbGxlY3Rpb246cGZiaWQwM2V6aDc3QXNHUTVVTTJZakdNd2tlblI4bWVRR2prR0F3ZW11YzkybkJERTZXanpxeGFuNjQ1dEwxUzQzbjZjbWdwUDI3a2lYdGM2cWM2UEZDdFY3VlB5dGlESmJtNmkzTWZrM2w=", use_per_next_cursor=True)
+        # info_list = await self.get_video_info_list_from_user(url, 10, use_per_next_cursor=True)
+
         if info_list:
-            # previous_data = self.load_test_data('_user')
-            # if previous_data:
-            #     info_list = previous_data + info_list
+            previous_data = self.load_test_data('_user')
+            if previous_data:
+                info_list = previous_data + info_list
             self.logger.debug(f"Total videos: {len(info_list)} video")
             self.save_test_data(info_list, '_user')
         return info_list

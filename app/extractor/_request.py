@@ -343,9 +343,10 @@ class ExtractorBase(AsyncBaseRequest):
     def save_test_data(self, data: Any, suffix: str = ""):
         try:
             if self._IS_TESTING:
-                folder = current_dir / '_data'
+                extractor_name = self._CLOUD_FOLDER.split('/')[-1]
+                folder = current_dir / '_data' / extractor_name
                 folder.mkdir(exist_ok=True)
-                with open(folder / f"__{self._CLOUD_FOLDER.split('/')[-1]}_data{suffix}.json", "w", encoding="utf-8", errors="strict") as out_f:
+                with open(folder / f"__{extractor_name}_data{suffix}.json", "w", encoding="utf-8", errors="strict") as out_f:
                     out_f.write(json.dumps(data, indent=2))
         except Exception as e:
             self.logger.error(
@@ -354,8 +355,9 @@ class ExtractorBase(AsyncBaseRequest):
     def load_test_data(self, suffix: str = ""):
         try:
             if self._IS_TESTING:
-                folder = current_dir / '_data'
-                with open(folder / f"__{self._CLOUD_FOLDER.split('/')[-1]}_data{suffix}.json", "r", encoding="utf-8", errors="strict") as in_f:
+                extractor_name = self._CLOUD_FOLDER.split('/')[-1]
+                folder = current_dir / '_data' / extractor_name
+                with open(folder / f"__{extractor_name}_data{suffix}.json", "r", encoding="utf-8", errors="strict") as in_f:
                     return json.load(in_f)
         except Exception as e:
             self.logger.error(
@@ -365,9 +367,10 @@ class ExtractorBase(AsyncBaseRequest):
     def save_error_text(self, text: str, ext: str = "txt", suffix: str = "_error"):
         try:
             if self._IS_TESTING:
-                folder = current_dir / '_data'
+                extractor_name = self._CLOUD_FOLDER.split('/')[-1]
+                folder = current_dir / '_data' / extractor_name
                 folder.mkdir(exist_ok=True)
-                with open(folder / f"__{self._CLOUD_FOLDER.split('/')[-1]}{suffix}.{ext}", "w", encoding="utf-8", errors="strict") as out_f:
+                with open(folder / f"__{extractor_name}{suffix}.{ext}", "w", encoding="utf-8", errors="strict") as out_f:
                     out_f.write(text)
         except Exception as e:
             self.logger.error(
@@ -379,8 +382,9 @@ class ExtractorBase(AsyncBaseRequest):
     def load_text_data(self, suffix: str = "", ext="html"):
         try:
             if self._IS_TESTING:
-                folder = current_dir / '_data'
-                with open(folder / f"__{self._CLOUD_FOLDER.split('/')[-1]}{suffix}.{ext}", "r", encoding="utf-8", errors="strict") as in_f:
+                extractor_name = self._CLOUD_FOLDER.split('/')[-1]
+                folder = current_dir / '_data' / extractor_name
+                with open(folder / f"__{extractor_name}{suffix}.{ext}", "r", encoding="utf-8", errors="strict") as in_f:
                     return in_f.read()
         except Exception as e:
             self.logger.error(
