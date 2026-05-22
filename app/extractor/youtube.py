@@ -742,8 +742,8 @@ class YouTubeExtractor(YouTubeBaseIE):
         cursor_position = int(cursor_position) if isinstance(cursor_position, int) \
             else int(0)
 
-        # html = await self.get_initial_data(url)
-        html = self.load_text_data()
+        html = await self.get_initial_data(url)
+        # html = self.load_text_data()
 
         if not html:
             return
@@ -869,6 +869,7 @@ class YouTubeExtractor(YouTubeBaseIE):
 
                     self.on_extracting({
                         "status": "progress",
+                        "url": url,
                         "data": result
                     })
                     info_list.append(result)

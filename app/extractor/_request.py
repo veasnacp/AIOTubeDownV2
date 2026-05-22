@@ -357,7 +357,12 @@ class ExtractorBase(AsyncBaseRequest):
             if self._IS_TESTING:
                 extractor_name = self._CLOUD_FOLDER.split('/')[-1]
                 folder = current_dir / '_data' / extractor_name
-                with open(folder / f"__{extractor_name}_data{suffix}.json", "r", encoding="utf-8", errors="strict") as in_f:
+                filepath = folder / f"__{extractor_name}_data{suffix}.json"
+                if not filepath.exists():
+                    self.logger.debug(
+                        f"[!] No test data found for {filepath}")
+                    return None
+                with open(filepath, "r", encoding="utf-8", errors="strict") as in_f:
                     return json.load(in_f)
         except Exception as e:
             self.logger.error(
@@ -384,7 +389,12 @@ class ExtractorBase(AsyncBaseRequest):
             if self._IS_TESTING:
                 extractor_name = self._CLOUD_FOLDER.split('/')[-1]
                 folder = current_dir / '_data' / extractor_name
-                with open(folder / f"__{extractor_name}{suffix}.{ext}", "r", encoding="utf-8", errors="strict") as in_f:
+                filepath = folder / f"__{extractor_name}{suffix}.{ext}"
+                if not filepath.exists():
+                    self.logger.debug(
+                        f"[!] No text data found for {filepath}")
+                    return None
+                with open(filepath, "r", encoding="utf-8", errors="strict") as in_f:
                     return in_f.read()
         except Exception as e:
             self.logger.error(

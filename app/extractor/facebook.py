@@ -240,6 +240,9 @@ class FacebookBaseIE(ExtractorBase):
                 if not uploader:
                     info_dict['uploader'] = username
 
+        node_id = node.get("id") or ""
+        info_dict["node_id"] = node_id
+
         return info_dict
 
     def updated_extract_node(self, node: dict):
@@ -351,19 +354,17 @@ class FacebookBaseIE(ExtractorBase):
             try:
                 parsed_obj = json.loads(cleaned_line)
                 if 'data' in parsed_obj and '"aggregated_fb_shorts":' in cleaned_line:
-                    edges = parsed_obj["data"]["node"]["aggregated_fb_shorts"]["edges"]
+                    aggregated_data = parsed_obj["data"]["node"]["aggregated_fb_shorts"]
+                    edges = aggregated_data["edges"]
                     for item in edges:
                         try:
                             node = item["profile_reel_node"]["node"]
                             info_dict = self.extract_node(node)
-                            node_id = node.get("id") or ""
-                            info_dict["node_id"] = node_id
-                            self.logger.debug(f"Extract node_id: {node_id}")
                         except Exception as e:
                             self.logger.debug(f"Error item parsing JSON: {e}")
                             continue
-                        # if callable(callback):
-                        #     callback(info_dict, node, edges)
+                        if callable(callback):
+                            callback(info_dict, node, aggregated_data)
                         video_info_list.append(info_dict)
 
                 elif len(video_info_list) > 0 and 'data' in parsed_obj and 'label' in parsed_obj and "defer$FBReelsFeedbackBar_feedback" in parsed_obj['label']:
@@ -387,6 +388,70 @@ class FacebookBaseIE(ExtractorBase):
                 self.logger.debug(f"Error parsing JSON: {e}")
 
         return video_info_list
+
+    def extrack_stats_from_user_html(self, html: str):
+        content_list = get_content_from_html_selector(
+            html, "script", ['type="application/json"', 'data-sjs'])
+        self.logger.debug(f"has content_list: {len(content_list)}")
+        stats_list = []
+        per_cursor = 10
+        for i, content in enumerate(content_list):
+            if per_cursor <= 0:
+                break
+            try:
+                has_result = "defer$FBReelsFeedbackBar_feedback" in content and '"result":' in content and '"feedback":' in content
+                if has_result:
+                    per_cursor -= 1
+                    _data = None
+                    for messy_content in content.split('"result":'):
+                        if '}},"sequence_number":' not in messy_content:
+                            continue
+                        try:
+                            _data = get_json_from_html(
+                                '"result":' + messy_content, "result", 2, '}},"sequence_number"') + '}}'
+                        except Exception as e:
+                            self.logger.debug(
+                                f"Error parsing JSON from result: {e}")
+                    if not _data:
+                        continue
+
+                    parsed_obj = json.loads(_data)
+                    data = parsed_obj.get('data') or {}
+                    node_id = data.get("id") or ""
+                    feedback = data.get('feedback') or {}
+
+                    if "unified_reactors" in feedback:
+                        stats = {
+                            "like_count": int(feedback['unified_reactors'].get('count', 0)),
+                            "view_count": int(feedback.get('view_count', 0)),
+                            "comment_count": int(feedback.get('total_comment_count', 0)),
+                            # string number to int
+                            "share_count": int(float(feedback.get('share_count_reduced', 0))),
+                            "node_id": node_id
+                        }
+                        stats_list.append(stats)
+                    elif "total_comment_count" in feedback:
+                        stats = {
+                            "like_count": 0,
+                            "view_count": 0,
+                            "comment_count": int(feedback.get('total_comment_count', 0)),
+                            # string number to int
+                            "share_count": int(float(feedback.get('share_count_reduced', 0))),
+                            "node_id": node_id
+                        }
+                        fb_reel_react_button = data.get(
+                            "fb_reel_react_button") or {}
+                        feedback = next(search_dict(
+                            fb_reel_react_button, "feedback"))
+                        if "unified_reactors" in feedback:
+                            stats['like_count'] = (
+                                feedback["unified_reactors"] or {}).get("count") or 0
+
+                        stats_list.append(stats)
+            except Exception as e:
+                self.logger.debug(f"Error Parsing JSON: {e}")
+
+        return stats_list
 
 
 class FacebookExtractor(FacebookBaseIE):
@@ -1011,8 +1076,8 @@ class FacebookExtractor(FacebookBaseIE):
                 self.logger.debug("Extracting videos from reel tab")
                 content = resp.text
 
-                def callback_func(info_dict, node, edges, cursor, cursor_position, page_id):
-                    page_info = edges["page_info"]
+                def callback_func(info_dict, node, aggregated_data, cursor, cursor_position, page_id):
+                    page_info = aggregated_data["page_info"]
                     prev_cursor = cursor
                     next_cursor = page_info["end_cursor"]
                     has_more = page_info["has_next_page"]
@@ -1034,8 +1099,8 @@ class FacebookExtractor(FacebookBaseIE):
 
                 self.extract_node_from_user(
                     content,
-                    lambda info_dict, node, edges: callback_func(
-                        info_dict, node, edges,
+                    lambda info_dict, node, aggregated_data: callback_func(
+                        info_dict, node, aggregated_data,
                         cursor, cursor_position, page_id
                     )
                 )
@@ -1136,6 +1201,9 @@ class FacebookExtractor(FacebookBaseIE):
                         break
 
                 html = _html or html
+
+                stats_list = self.extrack_stats_from_user_html(html)
+
                 for content in html.split('"collection":'):
                     if '"aggregated_fb_shorts":' in content:
                         entries_obj = parse_js_object(content)
@@ -1151,8 +1219,16 @@ class FacebookExtractor(FacebookBaseIE):
                         has_more = aggregated["page_info"]["has_next_page"]
 
                         for edge in aggregated["edges"]:
-                            video_info = self.extract_node(
-                                edge["profile_reel_node"]["node"])
+                            node = edge["profile_reel_node"]["node"]
+                            video_info = self.extract_node(node)
+                            node_id = video_info["node_id"]
+
+                            if stats_list and node_id:
+                                stats = next(
+                                    (stats for stats in stats_list if stats["node_id"] == node_id), None)
+                                if isinstance(stats, dict):
+                                    video_info.update(stats)
+
                             video_info['cursor'] = prev_cursor
                             video_info['next_cursor'] = next_cursor if has_more else ''
                             video_info['cursor_position'] = cursor_position
@@ -1252,25 +1328,22 @@ class FacebookExtractor(FacebookBaseIE):
         self._skip_cached_info = True
         # url = self._LINK_USER_REEL_WITH % ('rinsokreth.page', '')
         url = "https://web.facebook.com/profile.php?id=61585441798001&sk=reels_tab"
-        self.logger.debug(f"Video URL: {url}")
+        user_id = self.get_user_id(url)
+        self.logger.debug(f"User ID: {user_id}")
 
-        with open(current_dir / '_data' / '__facebook_data_user_graphql_test.txt', "r", encoding="utf-8") as file:
-            text_node = file.read()
+        test = True
 
-        # info_list = self.extract_node_from_user(text_node)
-        # if info_list:
-        #     self.logger.debug(f"Total Video: {len(info_list)}")
-        #     self.save_test_data(info_list, '_user_from_graphql')
+        # info_list = await self.get_video_info_list_from_user(url, None, cursor_continue="AQHSGo6i3C5rF_0SYK9hwda_tC7TzL9A02KSOt5QPX675U4UWGpbQJwR_bYvszYgoLVXLt_cOVC_Uia9aQw9DxV9Qw", cursor_position=1, page_id="YXBwX2NvbGxlY3Rpb246cGZiaWQwM2V6aDc3QXNHUTVVTTJZakdNd2tlblI4bWVRR2prR0F3ZW11YzkybkJERTZXanpxeGFuNjQ1dEwxUzQzbjZjbWdwUDI3a2lYdGM2cWM2UEZDdFY3VlB5dGlESmJtNmkzTWZrM2w=", use_per_next_cursor=True)
+        info_list = await self.get_video_info_list_from_user(url, 10, use_per_next_cursor=True)
 
-        info_list = await self.get_video_info_list_from_user(url, None, cursor_continue="AQHSGo6i3C5rF_0SYK9hwda_tC7TzL9A02KSOt5QPX675U4UWGpbQJwR_bYvszYgoLVXLt_cOVC_Uia9aQw9DxV9Qw", cursor_position=1, page_id="YXBwX2NvbGxlY3Rpb246cGZiaWQwM2V6aDc3QXNHUTVVTTJZakdNd2tlblI4bWVRR2prR0F3ZW11YzkybkJERTZXanpxeGFuNjQ1dEwxUzQzbjZjbWdwUDI3a2lYdGM2cWM2UEZDdFY3VlB5dGlESmJtNmkzTWZrM2w=", use_per_next_cursor=True)
-        # info_list = await self.get_video_info_list_from_user(url, 10, use_per_next_cursor=True)
-
+        self.logger.debug(f"Has info_list: {bool(info_list)}")
         if info_list:
-            previous_data = self.load_test_data('_user')
-            if previous_data:
+            previous_data: Optional[List[dict]
+                                    ] = self.load_test_data(f'_user_{user_id}')
+            if previous_data and previous_data[-1].get("cursor_position") != info_list[0].get("cursor_position"):
                 info_list = previous_data + info_list
             self.logger.debug(f"Total videos: {len(info_list)} video")
-            self.save_test_data(info_list, '_user')
+            self.save_test_data(info_list, f'_user_{user_id}')
         return info_list
 
     async def test_get_video_info_list(self):

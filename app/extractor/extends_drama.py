@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # from .douyin import DouyinExtractor as _DouyinExtractor
 from .facebook import FacebookExtractor as _FacebookExtractor
@@ -24,6 +24,27 @@ class YouTubeExtractor(_YouTubeExtractor):
 
     def get_video_url_play(self, chapter: Dict[str, Any]):
         return chapter.get("sd", "")
+
+    def get_next_options(self, chapter_list: List[Dict] | None = None, more="next"):
+        options = {
+            "limit": None,
+            "sort_by": "newest",
+            "next_data": None,
+            "cursor_position": 0,
+            "use_per_next_cursor": False if more == "all" else True,
+            "content_type": "videos",
+        }
+        if not chapter_list:
+            return options
+
+        last_chapter = chapter_list[-1]
+        next_data = last_chapter.get("next_data")
+        cursor_position = last_chapter.get("cursor_position")
+        cursor_position = cursor_position + 1 if cursor_position else 0
+        options["next_data"] = next_data
+        options["cursor_position"] = cursor_position
+
+        return options
 
     async def get_profile_info(
         self,
@@ -90,6 +111,30 @@ class FacebookExtractor(_FacebookExtractor):
     def get_video_url_play(self, chapter: Dict[str, Any]):
         return chapter.get("sd", "")
 
+    def get_next_options(self, chapter_list: List[Dict] | None = None, more="next"):
+        options = {
+            "limit": None,
+            "sort_by": "newest",
+            "cursor_continue": "",
+            "cursor_position": 0,
+            "use_per_next_cursor": False if more == "all" else True,
+            "content_type": "reels",
+            "page_id": None,
+        }
+        if not chapter_list:
+            return options
+
+        last_chapter = chapter_list[-1]
+        cursor_continue = last_chapter.get("next_cursor") or ""
+        cursor_position = last_chapter.get("cursor_position")
+        cursor_position = cursor_position + 1 if cursor_position else 0
+        page_id = last_chapter.get("page_id")
+        options["cursor_continue"] = cursor_continue
+        options["cursor_position"] = cursor_position
+        options["page_id"] = page_id
+
+        return options
+
     async def get_profile_info(
         self,
         url: str,
@@ -98,7 +143,8 @@ class FacebookExtractor(_FacebookExtractor):
         cursor_continue: str = '',
         cursor_position: int = 0,
         use_per_next_cursor: bool = False,
-        content_type: str = "reels"
+        content_type: str = "reels",
+        page_id: str | None = None
     ):
         info_list = await self.get_video_info_list_from_user(
             url,
@@ -107,7 +153,8 @@ class FacebookExtractor(_FacebookExtractor):
             cursor_continue,
             cursor_position,
             use_per_next_cursor,
-            content_type
+            content_type,
+            page_id
         )
         if not isinstance(info_list, list):
             self.logger.error(f"[!] ❌ No profile/videos info found")
@@ -153,6 +200,26 @@ class TikTokExtractor(_TikTokExtractor):
 
     def get_video_url_play(self, chapter: Dict[str, Any]):
         return chapter.get("sd", "")
+
+    def get_next_options(self, chapter_list: List[Dict] | None = None, more="next"):
+        options = {
+            "limit": None,
+            "sort_by": "newest",
+            "cursor_continue": "",
+            "cursor_position": 0,
+            "use_per_next_cursor": False if more == "all" else True,
+        }
+        if not chapter_list:
+            return options
+
+        last_chapter = chapter_list[-1]
+        cursor_continue = last_chapter.get("next_cursor") or ""
+        cursor_position = last_chapter.get("cursor_position")
+        cursor_position = cursor_position + 1 if cursor_position else 0
+        options["cursor_continue"] = cursor_continue
+        options["cursor_position"] = cursor_position
+
+        return options
 
     async def get_profile_info(
         self,
@@ -226,6 +293,26 @@ class KuaishouExtractor(_KuaishouExtractor):
 
         if raw_cookies:
             self.set_cookies(raw_cookies)
+
+    def get_next_options(self, chapter_list: List[Dict] | None = None, more="next"):
+        options = {
+            "limit": None,
+            "sort_by": "newest",
+            "cursor_continue": "",
+            "cursor_position": 0,
+            "use_per_next_cursor": False if more == "all" else True,
+        }
+        if not chapter_list:
+            return options
+
+        last_chapter = chapter_list[-1]
+        cursor_continue = last_chapter.get("next_cursor") or ""
+        cursor_position = last_chapter.get("cursor_position")
+        cursor_position = cursor_position + 1 if cursor_position else 0
+        options["cursor_continue"] = cursor_continue
+        options["cursor_position"] = cursor_position
+
+        return options
 
     async def get_profile_info(
         self,
