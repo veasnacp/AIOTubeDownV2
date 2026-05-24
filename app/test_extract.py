@@ -19,8 +19,8 @@ def test_youtube_extractor():
 
     youtube = YouTubeExtractor()
     youtube.set_test_mode(True)
-    # asyncio.run(youtube.test_get_video_info_list())
-    asyncio.run(youtube.test_get_video_info_list_from_user())
+    asyncio.run(youtube.test_get_video_info_list())
+    # asyncio.run(youtube.test_get_video_info_list_from_user())
 
     # info_list = youtube.load_test_data()
     # if info_list:
@@ -268,8 +268,8 @@ class ShortTvCrypto:
 
 def test_all():
     logger.info("Testing Extractor:")
-    # test_youtube_extractor()
-    test_facebook_extractor()
+    test_youtube_extractor()
+    # test_facebook_extractor()
     # test_tiktok_extractor()
     # test_douyin_extractor()
     # test_kuaishou_extractor()

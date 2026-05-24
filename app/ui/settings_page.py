@@ -30,13 +30,13 @@ from PySide6Addons.components.widgets.label import CaptionLabel
 
 from ..components.override import CardWidget
 from ..config.constants import APP_NAME, DIRS
-from ..theme import Colors, LightMode
+from ..theme import Colors, DarkMode, LightMode
 
 qconfig.file = DIRS.user_data_path / "settings.json"
 qconfig.save = lambda: None
 
 qconfig.fontFamilies = ConfigItem(APP_NAME, "FontFamilies", [
-    'Segoe UI', 'Kantumruy Pro', 'Microsoft YaHei', 'PingFang SC'
+    'Segoe UI', 'Battambang', 'Microsoft YaHei', 'PingFang SC'
 ])
 
 
@@ -162,7 +162,7 @@ class SettingsPage(ScrollArea):
 
         # Connect signals
         self.themeCard.optionChanged.connect(self.onThemeChanged)
-        self.accentColorCard.colorChanged.connect(setThemeColor)
+        self.accentColorCard.colorChanged.connect(self.onAccentColorChanged)
         self.feedbackCard.clicked.connect(self.onFeedbackClicked)
         self.updateCard.clicked.connect(self.onUpdateClicked)
         self.licenseCard.clicked.connect(self.onLicenseClicked)
@@ -184,10 +184,11 @@ class SettingsPage(ScrollArea):
             themes = [Theme.LIGHT.value, Theme.DARK.value, "system"]
             self.window().set_theme(themes[index])
 
-    def onAccentColorChanged(self, index):
-        colors = [Colors.blue_9, Colors.green_9, Colors.red_9, Colors.purple_9, Colors.orange_9,
-                  Colors.yellow_9, Colors.teal_9, Colors.pink_9, Colors.cyan_9, Colors.brown_9]
-        setThemeColor(colors[index])
+    def onAccentColorChanged(self, color: QColor):
+        setThemeColor(color)
+        LightMode.primary = color.name()
+        DarkMode.primary = color.name()
+        self.update()
 
     def onTitleBarChanged(self, checked):
         pass

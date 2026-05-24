@@ -219,7 +219,7 @@ class AsyncBaseRequest:
             except (RequestsError, asyncio.TimeoutError) as e:
                 if attempt == retries:
                     self.logger.error(
-                        f"[!] Final attempt failed for {url}: {e}")
+                        f"[!] Final attempt failed: {e}")
                     return {"error": str(e), "url": url}
 
                 wait = (attempt + 1) * 2
@@ -276,7 +276,7 @@ class AsyncBaseRequest:
             except (RequestsError, TimeoutError) as e:
                 if attempt == retries:
                     self.logger.error(
-                        f"[!] Final attempt failed for {url}: {e}")
+                        f"[!] Final attempt failed: {e}")
                     return {"error": str(e), "url": url}
 
                 wait = (attempt + 1) * 2
@@ -371,7 +371,7 @@ class ExtractorBase(AsyncBaseRequest):
 
     def save_error_text(self, text: str, ext: str = "txt", suffix: str = "_error"):
         try:
-            if self._IS_TESTING:
+            if self._IS_TESTING and text:
                 extractor_name = self._CLOUD_FOLDER.split('/')[-1]
                 folder = current_dir / '_data' / extractor_name
                 folder.mkdir(exist_ok=True)

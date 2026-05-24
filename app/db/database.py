@@ -74,13 +74,20 @@ class Database:
         if not kwargs:
             return
         conn = self.get_connection()
-        cursor = conn.cursor()
-        keys = ", ".join([f"{k} = ?" for k in kwargs.keys()])
-        values = list(kwargs.values())
-        values.append(task_id)
-        cursor.execute(f"UPDATE downloads SET {keys} WHERE id = ?", values)
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            keys = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+            values = list(kwargs.values())
+            values.append(task_id)
+            cursor.execute(f"UPDATE downloads SET {keys} WHERE id = ?", values)
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating task {task_id}: {e}")
+            if "NOT NULL constraint failed" in str(e) and "url" in str(kwargs.keys()) and kwargs["url"] is None:
+                logger.error(f"Removing task {task_id} due to NULL url")
+                self.remove_task(task_id)
+        finally:
+            conn.close()
 
     def get_all_tasks(self):
         conn = self.get_connection()
@@ -93,10 +100,14 @@ class Database:
 
     def remove_task(self, task_id):
         conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM downloads WHERE id = ?", (task_id,))
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM downloads WHERE id = ?", (task_id,))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error removing task {task_id}: {e}")
+        finally:
+            conn.close()
 
 
 db = Database()

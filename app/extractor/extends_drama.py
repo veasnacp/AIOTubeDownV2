@@ -1,13 +1,16 @@
+import asyncio
 import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-# from .douyin import DouyinExtractor as _DouyinExtractor
+from ..extractor._utils import arr_chunk
 from .facebook import FacebookExtractor as _FacebookExtractor
 from .kuaishou import KuaishouExtractor as _KuaishouExtractor
 from .tiktok import TikTokExtractor as _TikTokExtractor
 from .youtube import YouTubeExtractor as _YouTubeExtractor
 from .youtube import YouTubeSortBy
+
+# from .douyin import DouyinExtractor as _DouyinExtractor
 
 current_dir = Path(__file__).parent
 
@@ -83,6 +86,40 @@ class YouTubeExtractor(_YouTubeExtractor):
                 break
         info['chapterList'] = info_list
         self._cache[username] = info
+        return info
+
+    async def update_all_episodes(self, info, chunk_size=10):
+        chapter_list = info['chapterList']
+        url_list = [
+            chapter_info['url'] for chapter_info in chapter_list
+            if not chapter_info.get('sd') and not chapter_info.get('hd')
+        ]
+
+        if len(url_list) <= 0:
+            return info
+
+        return await self.update_episodes_selected(url_list, info)
+
+    async def update_episodes_selected(self, url_list: list[str], info: Dict[str, Any]):
+        user_id = info['id']
+        chapter_list = info['chapterList']
+
+        def merge_info(video_info):
+            if video_info.get("id"):
+                for chapter_info in chapter_list:
+                    if chapter_info['id'] == video_info['id']:
+                        chapter_info.update(video_info)
+                        break
+
+        video_info_list = await self.get_video_info_list(url_list, merge_info)
+        if video_info_list and len(video_info_list) > 0:
+            msg = ""
+            if len(video_info_list) == 1:
+                msg = f" from ID: {video_info_list[0].get('id')}"
+            self.logger.info(
+                f"[!] ✅ Updated {len(video_info_list)} videos{msg}")
+
+        self._cache[user_id] = info
         return info
 
     async def download_all_episodes(

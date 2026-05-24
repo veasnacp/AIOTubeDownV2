@@ -188,8 +188,9 @@ class DownloadWorker(QRunnable):
                 if self.info:
                     _info, is_both, video_url, audio_url = self.select_format_for_yt_dlp(
                         int(res))
-                    # logger.debug(
-                    #     f"_info: {_info.get('url')}, is_both: {is_both}, video_url: {video_url}, audio_url: {audio_url}")
+                    logger.debug(
+                        f"_info: {_info.get('url')}, is_both: {is_both}, video_url: {video_url}, audio_url: {audio_url}")
+                    logger.debug(f"ydl_opts: {ydl_opts}")
                     video_url = video_url or self.info['url']
                     if only_download_audio:
                         if has_audio_url and audio_url:

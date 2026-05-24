@@ -312,6 +312,9 @@ class ReelShortExtractor(DramaExtractorBase):
     def get_cover_url(self, info: dict) -> str:
         return info.get('book_pic', '')
 
+    def get_chapter_id(self, chapter: dict) -> str:
+        return chapter.get('chapter_id') or ''
+
     async def _get_chapter_info(self, book_id: str, chapter_id: str):
         resp = await self.request(
             f'{self._BASE_URL}/api/video/book/getChapterInfo',
@@ -384,17 +387,29 @@ class ReelShortExtractor(DramaExtractorBase):
                     out_f.write(response.text)
 
     async def update_all_episodes(self, info, chunk_size=10):
+        chapter_id_list = [
+            chapter_info['chapter_id'] for chapter_info in info['chapterList']
+            if 'is_preview' not in chapter_info and 'video_url' not in chapter_info and 'chapter_id' in chapter_info
+        ]
+        return await self.update_episodes_selected(chapter_id_list, info, chunk_size)
+
+    async def update_episodes_selected(self, chapter_id_list: List[str], info, chunk_size=10):
         drama_id = info['book_id']
         tasks = []
+        count = 0
         for chunk in arr_chunk(info['chapterList'], chunk_size):
+            if not chapter_id_list or len(chapter_id_list) <= count:
+                break
             async with asyncio.TaskGroup() as tg:
                 for chapter_info in chunk:
-                    if 'is_preview' in chapter_info:
-                        continue
                     chapter_id = chapter_info['chapter_id']
+                    video_url = self.get_video_url_play(chapter_info)
+                    if 'is_preview' in chapter_info or chapter_id not in chapter_id_list or video_url:
+                        continue
                     if self._IS_TESTING:
                         self.logger.debug(
                             f"[!] 🔍 Fetching video info for episode: {chapter_id}")
+                    count += 1
                     tasks.append(tg.create_task(
                         self._get_chapter_info(drama_id, chapter_id)))
 
@@ -539,6 +554,9 @@ class DramaBiteExtractor(DramaExtractorBase):
     async def _get_episode_list(self, drama_id: str):
         resp = await self._api_endpoint('episode_list', {'cid': drama_id})
         return resp
+
+    def get_chapter_id(self, chapter: dict) -> str:
+        return chapter.get('vid') or ''
 
     async def _get_chapter_info(self, drama_id: str, episode_id: str):
         resp = await self._api_endpoint('episode_detail', {'cid': drama_id, 'vid': episode_id})
@@ -912,6 +930,9 @@ class ShortMovsExtractor(DramaExtractorBase):
             "embed_url": embed_url,
         }
 
+    def get_chapter_id(self, chapter: dict) -> str:
+        return chapter.get('id') or ''
+
     async def _get_chapter_info(self, drama_id: str, episode_id: str):
         url = self._LINK_EP % (drama_id, episode_id)
         html = await self._get_html(url)
@@ -1020,12 +1041,26 @@ class ShortMovsExtractor(DramaExtractorBase):
         }
 
     async def update_all_episodes(self, info, chunk_size=10):
+        chapter_id_list = [
+            chapter_info['id'] for chapter_info in info['chapterList']
+            if 'video_url' not in chapter_info and 'id' in chapter_info
+        ]
+        return await self.update_episodes_selected(chapter_id_list, info, chunk_size)
+
+    async def update_episodes_selected(self, chapter_id_list: List[str], info, chunk_size=10):
         drama_id = info['book_id']
         tasks: list[asyncio.Task] = []
+        count = 0
         for chunk in arr_chunk(info['chapterList'], chunk_size):
+            if not chapter_id_list or len(chapter_id_list) <= count:
+                break
             async with asyncio.TaskGroup() as tg:
                 for chapter_info in chunk:
                     episode_id = chapter_info['id']
+                    video_url = self.get_video_url_play(chapter_info)
+                    if episode_id not in chapter_id_list or video_url:
+                        continue
+                    count += 1
                     if self._IS_TESTING:
                         self.logger.debug(
                             f"[!] 🔍 Fetching video info for episode: {episode_id}")

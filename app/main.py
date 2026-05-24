@@ -37,7 +37,7 @@ def main():
     app.setOrganizationDomain("https://youtube.com/@veasnacoder")
 
     # load font current directory
-    font_path = Path.cwd() / "fonts" / "KantumruyPro.ttf"
+    font_path = Path.cwd() / "fonts" / "Battambang.ttf"
     if font_path.exists():
         QFontDatabase.addApplicationFont(str(font_path))
 

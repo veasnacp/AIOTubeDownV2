@@ -21,8 +21,8 @@ class Properties:
 
     @staticmethod
     def _get_modified_time(task_data):
-        path = os.path.join(task_data.get('save_path', ''),
-                            task_data.get('filename', ''))
+        path = os.path.join(task_data.get('save_path') or '',
+                            task_data.get('filename') or '')
         if os.path.exists(path):
             mtime = os.path.getmtime(path)
             return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
@@ -31,15 +31,15 @@ class Properties:
     @staticmethod
     def _get_details(task_data) -> list[tuple[str, str]]:
         return [
-            ("Name:", task_data.get('filename', 'Unknown')),
-            ("Status:", task_data.get('status', 'Unknown')),
+            ("Name:", task_data.get('filename') or 'Unknown'),
+            ("Status:", task_data.get('status') or 'Unknown'),
             ("Type:", PropertiesDialog._get_file_type(
-                task_data.get('filename', ''))),
+                task_data.get('filename') or '')),
             ("Size:", humanize.naturalsize(task_data.get('size_total', 0))),
-            ("Created:", task_data.get('date_added', 'Unknown')),
+            ("Created:", task_data.get('date_added') or 'Unknown'),
             ("Modified:", PropertiesDialog._get_modified_time(task_data)),
-            ("Location:", task_data.get('save_path', 'Unknown')),
-            ("URL:", task_data.get('url', 'Unknown'))
+            ("Location:", task_data.get('save_path') or 'Unknown'),
+            ("URL:", task_data.get('url') or 'Unknown')
         ]
 
 
@@ -80,6 +80,9 @@ class PropertiesDialog(MessageBoxBase, Properties):
 
     @staticmethod
     def _get_file_type(filename):
+        if not isinstance(filename, str):
+
+            return "Unknown"
         if '.' in filename:
             ext = filename.split('.')[-1].upper()
             return f"{ext} File"
@@ -87,8 +90,8 @@ class PropertiesDialog(MessageBoxBase, Properties):
 
     @staticmethod
     def _get_modified_time(task_data):
-        path = os.path.join(task_data.get('save_path', ''),
-                            task_data.get('filename', ''))
+        path = os.path.join(task_data.get('save_path') or '',
+                            task_data.get('filename') or '')
         if os.path.exists(path):
             mtime = os.path.getmtime(path)
             return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
@@ -97,13 +100,13 @@ class PropertiesDialog(MessageBoxBase, Properties):
     @staticmethod
     def _get_details(task_data) -> list[tuple[str, str]]:
         return [
-            ("Name:", task_data.get('filename', 'Unknown')),
-            ("Status:", task_data.get('status', 'Unknown')),
+            ("Name:", task_data.get('filename') or 'Unknown'),
+            ("Status:", task_data.get('status') or 'Unknown'),
             ("Type:", PropertiesDialog._get_file_type(
-                task_data.get('filename', ''))),
+                task_data.get('filename') or '')),
             ("Size:", humanize.naturalsize(task_data.get('size_total', 0))),
-            ("Created:", task_data.get('date_added', 'Unknown')),
+            ("Created:", task_data.get('date_added') or 'Unknown'),
             ("Modified:", PropertiesDialog._get_modified_time(task_data)),
-            ("Location:", task_data.get('save_path', 'Unknown')),
-            ("URL:", task_data.get('url', 'Unknown'))
+            ("Location:", task_data.get('save_path') or 'Unknown'),
+            ("URL:", task_data.get('url') or 'Unknown')
         ]

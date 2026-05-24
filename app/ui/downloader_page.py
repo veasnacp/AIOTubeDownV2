@@ -34,6 +34,7 @@ from PySide6Addons import (
 
 from ..components.icons import FileIcon
 from ..components.override import CardWidget, TransparentToolButton
+from ..config.constants import APP_NAME, DIRS
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
 from ..core.thumbnail_manager import thumbnail_manager
@@ -224,8 +225,18 @@ class DownloaderPage(ScrollArea):
         self.action_panel.delete_clicked.connect(self.remove_selected_tasks)
         self.action_panel.delete_all_clicked.connect(self.remove_all_tasks)
 
-        # self.update_theme()
-        # qconfig.themeChanged.connect(self.update_theme)
+        self.download_options = {
+            "url_text": "",
+            "category": "Videos",
+            "resolution": "720",
+            "engine": "Default",
+            "count": 10,
+            "path": str(DIRS.user_downloads_path.joinpath(APP_NAME)),
+            "with_site": True,
+            "with_username": True,
+            "thumbnail": False,
+            "mp3": False,
+        }
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         if self.window().width() < 960:
@@ -248,18 +259,28 @@ class DownloaderPage(ScrollArea):
 
     def add_url_test(self, text: str = None):
         dialog = AddUrlDialog(self.window())
+        dialog.set_options(self.download_options)
         if text:
             dialog.url_edit.setPlainText(text)
-            # Trigger stats update
-            dialog._update_stats()
+        elif self.download_options["url_text"]:
+            dialog.url_edit.setPlainText(self.download_options["url_text"])
 
-        if dialog.exec():
+        result = dialog.exec()
+        if result == dialog.DialogCode.Accepted:
+            text = dialog.url_edit.toPlainText().strip()
+            self.download_options.update({"url_text": text})
             urls, invalid_urls = dialog.get_urls()
+            options = dialog.get_options()
+            self.download_options.update(options)
             if len(urls) == 0:
                 return
-            options = dialog.get_options()
             extract_manager.start_extraction(urls)
             extract_manager.options = options
+        elif result == dialog.DialogCode.Rejected:
+            text = dialog.url_edit.toPlainText().strip()
+            self.download_options.update({"url_text": text})
+            options = dialog.get_options()
+            self.download_options.update(options)
 
     def remove_selected_tasks(self, task_id=None):
         if task_id and isinstance(task_id, int):

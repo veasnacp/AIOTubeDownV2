@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSize
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from PySide6Addons import (
     CheckBox,
@@ -121,7 +122,7 @@ class AddUrlDialog(MessageBoxBase):
         )
         # set 720p default
         self.res_combo.setCurrentIndex(2)
-        self.res_combo.setFixedWidth(130)
+        self.res_combo.setFixedWidth(140)
 
         self.provider_combo = ComboBox(self)
         self.provider_combo.addItems(["Default", "Direct"])
@@ -160,7 +161,12 @@ class AddUrlDialog(MessageBoxBase):
         if window_width < 1000:
             self.widget.setMinimumSize(QSize(600, 460))
         else:
-            self.widget.setMinimumSize(QSize(window_width - 400, 500))
+            self.widget.setMinimumSize(QSize(800, 500))
+
+    def closeEvent(self, event: QCloseEvent, /) -> None:
+        event.ignore()
+        self.reject()
+        return super().closeEvent(event)
 
     def _update_stats(self):
         valid_urls, invalid_urls = self.get_urls()
@@ -201,6 +207,21 @@ class AddUrlDialog(MessageBoxBase):
             else:
                 invalid_urls.append(u)
         return valid_urls, invalid_urls
+
+    def set_options(self, options):
+        self.cb_mp3.setChecked(options["mp3"])
+        self.cb_thumbnail.setChecked(options["thumbnail"])
+        self.cb_site_folder.setChecked(options["with_site"])
+        self.cb_user_folder.setChecked(options["with_username"])
+        self.path_edit.setText(options["path"])
+        self.cat_combo.setCurrentText(options["category"])
+        res_map = {"360": 0, "480": 1, "720": 2,
+                   "1080": 3, "1440": 4, "2160": 5}
+        self.res_combo.setCurrentIndex(res_map.get(options["resolution"], 2))
+        self.provider_combo.setCurrentText(options["engine"])
+        self.count_spin.setValue(options["count"])
+        self._update_download_folder()
+        self._update_stats()
 
     def get_options(self):
         # 0: 360, 1: 480, 2: 720, 3: 1080, 4: 1440, 5: 2160

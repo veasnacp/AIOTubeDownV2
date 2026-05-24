@@ -281,14 +281,15 @@ class DouyinExtractor(DouyinRequest):
 
         content = response.text
         if self._IS_TESTING:
-            suffix = '_user' if '/user/' in url else ''
+            suffix = '_user' if '/user/' in url else '_video'
             self.save_html_text(content, suffix)
         if not response.status_code == 200:
             self.logger.error(f"[-] Invalid response: {response}")
             return None
 
+        _url, _ = self.get_url_video_id(url)
         self.logger.info(
-            f"[*] Received response: {response.status_code} for {url}")
+            f"[*] Received response: {response.status_code} for {_url}")
 
         return content
 
@@ -297,7 +298,8 @@ class DouyinExtractor(DouyinRequest):
             # Human-like delay (Jitter) to avoid pattern detection
             await asyncio.sleep(random.uniform(1.5, 4.0))
         try:
-            content = await self._get_html_content(url)
+            mobile_url, _ = self.get_url_video_id(url, True)
+            content = await self._get_html_content(mobile_url)
 
             if not content:
                 return None

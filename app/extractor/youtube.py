@@ -22,6 +22,7 @@ from urllib.parse import quote, unquote
 from curl_cffi.requests import AsyncSession, Response, Session
 
 # from pytubefix import extract
+from yt_dlp import YoutubeDL
 from yt_dlp.utils import format_bytes
 
 from ._request import (
@@ -205,14 +206,7 @@ class YouTubeBaseIE(ExtractorBase):
             "audio_only": [],
             "video_only": [],
             "both": [],
-            "http_headers": {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Connection': 'keep-alive',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': f'{self._BASE_URL}/',
-                'Origin': self._BASE_URL,
-            },
+            "http_headers": self.http_headers,
             "user_info": {
                 **user,
                 **update_user_info
@@ -298,12 +292,9 @@ class YouTubeBaseIE(ExtractorBase):
             ytInitialPlayerResponse = [
                 "{" + c for c in matches.groups() if 'playerMicroformatRenderer' in c][0] if matches else None
             if ytInitialPlayerResponse:
-                with open(current_dir.joinpath("_data", "__mobile_ytInitialPlayerResponse.txt"), "w", encoding="utf-8") as f:
-                    f.write(ytInitialPlayerResponse)
+                self.save_test_data(ytInitialPlayerResponse,
+                                    "_ytInitialPlayerResponse")
 
-            # ytInitialPlayerResponse = self.get_json_from_html(html, "ytInitialPlayerResponse", 6, '"}}}};').strip() + '"}}}}'
-            # with open("mobile_ytInitialPlayerResponse.txt", "w", encoding="utf-8") as f:
-            #         f.write(ytInitialPlayerResponse)
             try:
                 if not ytInitialPlayerResponse.endswith("}}}}") and "}}}};var" in ytInitialPlayerResponse:
                     ytInitialPlayerResponse = ytInitialPlayerResponse.split("}}}};var")[
@@ -568,11 +559,20 @@ class YouTubeBaseIE(ExtractorBase):
 
 class YouTubeExtractor(YouTubeBaseIE):
 
-    def __init__(self, proxies: Optional[List[str]] = None, impersonate: BrowserTypeLiteral = "chrome", timeout: int = 30):
+    def __init__(self, proxies: Optional[List[str]] = None, impersonate: BrowserTypeLiteral = "chrome120", timeout: int = 30):
         super().__init__(proxies, impersonate, timeout)
 
         self.concurrent_tasks = 10  # Limit concurrent tasks to avoid rate limiting
         self.delay_jitter = False  # Disable human-like delay by default
+
+        self.http_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Connection': 'keep-alive',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': f'{self._BASE_URL}/',
+            'Origin': self._BASE_URL,
+        }
 
     @staticmethod
     def load_youtube_cookies(raw_cookie: str):
@@ -593,10 +593,22 @@ class YouTubeExtractor(YouTubeBaseIE):
             # Human-like delay (Jitter) to avoid pattern detection
             await asyncio.sleep(random.uniform(1.5, 4.0))
         # Every time we hit a new page, we can rotate the proxy
+
+        # url = self.get_video_url(url)
+        print(f"URL: {url}")
         self.session.cookies.set("CONSENT", "YES+cb", domain=".youtube.com")
 
+        headers = {
+            "Accept": "*/*",
+            "Connection": "keep-alive",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"{self._BASE_URL}/",
+            "Origin": f"{self._BASE_URL}"
+        }
         response = await self.request(
             url,
+            headers=headers,
+            retries=3,
         )
         if isinstance(response, Response) and response.status_code == 200:
             return response.text
@@ -906,8 +918,39 @@ class YouTubeExtractor(YouTubeBaseIE):
             use_per_next_cursor,
         )
 
+    async def get_video_info_list_yt_dlp(
+        self,
+        url_list: list[str],
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
+        video_info_list = []
+        for url in url_list:
+            if self.cancel:
+                self.on_extracting({"status": "cancelled"})
+                break
+            try:
+                with YoutubeDL() as ydl:
+                    _info = ydl.extract_info(url, download=False)
+                    if _info:
+                        _info["http_headers"] = self.http_headers
+                    if callback:
+                        callback(_info)
+                    self._on_extracting({
+                        "status": "progress",
+                        "url": url,
+                        "data": _info
+                    })
+                    video_info_list.append(_info)
+            except Exception as e:
+                self.logger.debug(f"❌ Error downloading video: {e}")
+                self._on_extracting(
+                    {"error": str(e), "url": url, "status": "error"})
+
+        return video_info_list
+
     async def get_video_info_list(
         self, url_list: list[str],
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         # Use a Semaphore to control how many tasks run at once
         semaphore = asyncio.Semaphore(self.concurrent_tasks)
@@ -921,9 +964,9 @@ class YouTubeExtractor(YouTubeBaseIE):
                 if self.cancel:
                     self.on_extracting({"status": "cancelled"})
                     break
-                url = self.get_video_url(url, True)
+                mobile_url = self.get_video_url(url, True)
                 valid_url_list.append(url)
-                tasks.append(self.get_initial_data(url))
+                tasks.append(self.get_initial_data(mobile_url))
 
         html_list = await asyncio.gather(*tasks)
         video_info_list = []
@@ -945,6 +988,8 @@ class YouTubeExtractor(YouTubeBaseIE):
                 #         return None
 
                 video_info = self.get_video_info(html)
+                if callback:
+                    callback(video_info)
                 self._on_extracting({
                     "status": "progress",
                     "url": valid_url_list[i],
@@ -1005,11 +1050,11 @@ class YouTubeExtractor(YouTubeBaseIE):
         url = self._LINK_ID % self._TEST_VIDEO_ID
         video_id = self.get_video_id(url)
         self.logger.debug(f"Video URL: {url}, {video_id}")
-        # info_list = await self.get_video_info_list([url])
-        info_list = self.load_test_data()
+        info_list = await self.get_video_info_list([url])
+        # info_list = self.load_test_data()
         if info_list:
-            for info in info_list:
-                selected_info = self.get_selected_video_info(info)
-                info["selected_info"] = selected_info
+            # for info in info_list:
+            #     selected_info = self.get_selected_video_info(info)
+            #     info["selected_info"] = selected_info
             self.save_test_data(info_list)
         return info_list

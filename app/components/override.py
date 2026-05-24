@@ -15,16 +15,12 @@ from PySide6Addons import RoundMenu as FluentRoundMenu
 from PySide6Addons import SegmentedItem as SimpleSegmentedItem
 from PySide6Addons import SegmentedWidget, SimpleCardWidget, SpinBox, TextEdit
 from PySide6Addons import ToolTip as QFTooltip
+from PySide6Addons import ToolTipFilter, ToolTipPosition
 from PySide6Addons import (
-    ToolTipFilter,
-    ToolTipPosition,
-    drawIcon,
-    isDarkTheme,
-    setFont,
-    themeColor,
     TransparentDropDownToolButton as FluentTransparentDropDownToolButton,
-    TransparentToolButton as FluentTransparentToolButton,
 )
+from PySide6Addons import TransparentToolButton as FluentTransparentToolButton
+from PySide6Addons import drawIcon, isDarkTheme, setFont, themeColor
 from PySide6Addons.common.color import autoFallbackThemeColor
 from PySide6Addons.components.widgets.combo_box import ComboBoxMenu
 from PySide6Addons.components.widgets.menu import LineEditMenu, TextEditMenu
@@ -232,7 +228,8 @@ class CardWidget(SimpleCardWidget):
         dark_background_color: Optional[Union[str, QColor]] = None,
         disableAnimation: bool = True
     ):
-        self._light_background_color = light_background_color or LightMode.card_soft_light
+        self._light_background_color = light_background_color or Colors.qt_alpha(
+            LightMode.card_soft_light, 0.7)
         self._dark_background_color = dark_background_color or DarkMode.card_soft_light
         super().__init__(parent)
         self.disableAnimation = disableAnimation

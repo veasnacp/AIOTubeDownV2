@@ -223,12 +223,11 @@ class ExtractWorker(DefaultWorker):
 
         for key, value in extract_dict.items():
             if key.split("_")[0] in BASE_EXTRACTORS and len(value) > 0:
-                is_profile = key.endswith("profile_list")
                 extractor_class = BASE_EXTRACTORS[key.split("_")[
                     0]]
-                self.run_extractor(extractor_class)
+                self.run_extractor(extractor_class, url_list=value)
 
-    def run_extractor(self, extractor_class: TYPE_EXTRACTOR):
+    def run_extractor(self, extractor_class: TYPE_EXTRACTOR, url_list: list[str]):
         try:
             async def run():
                 async with extractor_class() as scout:
@@ -258,7 +257,10 @@ class ExtractWorker(DefaultWorker):
                             'status': 'start',
                             'extractor': f"{extractor_name}".upper(),
                         })
-                    info_list = await scout.get_video_info_list(self.urls)
+                    if hasattr(scout, "get_video_info_list_yt_dlp"):
+                        info_list = await scout.get_video_info_list_yt_dlp(url_list)
+                    else:
+                        info_list = await scout.get_video_info_list(url_list)
                     self.signals.finished.emit(self.task_id, {
                         'status': 'finished',
                         'data': info_list

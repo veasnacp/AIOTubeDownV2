@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import hashlib
+import os
 import re
 import urllib.request
 from pathlib import Path
@@ -40,7 +41,9 @@ from PySide6Addons import (
     FluentIcon,
     LineEdit,
     MenuIndicatorType,
-    PrimaryPushButton,
+)
+from PySide6Addons import PrimaryPushButton as _PrimaryPushButton
+from PySide6Addons import (
     ProgressBar,
     PushButton,
     ScrollArea,
@@ -49,6 +52,7 @@ from PySide6Addons import (
     TabBar,
     TabCloseButtonDisplayMode,
     TogglePushButton,
+    ToolButton,
     isDarkTheme,
     setFont,
 )
@@ -60,6 +64,7 @@ from ..components.override import TextInput as LineEdit
 from ..components.override import TransparentDropDownToolButton, TransparentToolButton
 from ..components.player import VideoPlayerDialog
 from ..core._worker import DefaultWorker
+from ..extractor._utils import safe_filename
 from ..extractor.drama import (
     DramaBiteExtractor,
     DramaBoxExtractor,
@@ -77,7 +82,15 @@ from ..extractor.extends_drama import (
     YouTubeExtractor,
 )
 from ..theme import Colors, DarkMode, LightMode
+from ..utils.path import reveal_file
 from ..utils.validation import is_valid_url
+
+
+class PrimaryPushButton(_PrimaryPushButton):
+    def setStyleSheet(self, styleSheet: str, /) -> None:
+        styleSheet = f"{styleSheet}PrimaryPushButton{{color: {Colors.gray_9};}}"
+        return super().setStyleSheet(styleSheet)
+
 
 TYPE_DRAMA_EXTRACTOR: TypeAlias = Optional[Union[
     'DramaExtractorBase',
@@ -141,13 +154,16 @@ class ScrapeSignals(QObject):
 class ScrapeWorker(QRunnable):
     """Worker task to run async scrape in the background"""
 
-    def __init__(self, extractor: TYPE_DRAMA_EXTRACTOR, url, info_key):
+    def __init__(self, extractor: TYPE_DRAMA_EXTRACTOR, url, info_key, tab_id: Optional[str] = None):
         super().__init__()
         self.extractor = copy.copy(extractor) if extractor else None
         self.url = url
         self.info_key = info_key
         self._info: Optional[dict] = None
         self.signals = ScrapeSignals()
+        self.mode = "normal"
+        self.url_episodes_selected: Optional[list[str]] = None
+        self.refresh_build_id_key: Optional[str] = None
         self.options = {
             "limit": None,
             "sort_by": "newest",
@@ -159,13 +175,18 @@ class ScrapeWorker(QRunnable):
             "page_id": None
         }
         self.more: Optional[str] = None
+        self.tab_id = tab_id
+        self.logger = logger.bind(tab_id=self.tab_id)
+        if self.extractor:
+            self.extractor.logger = self.extractor.logger.bind(
+                tab_id=self.tab_id)
 
     async def update_all_episodes(self, info: dict):
         has_episodes_updated = info.get('episodes_updated', False)
         if not has_episodes_updated \
                 and hasattr(self.extractor, 'update_all_episodes') \
                 and callable(self.extractor.update_all_episodes):
-            logger.info(
+            self.logger.info(
                 f"Updating all episodes for {info.get('drama_title')}")
             new_info = await self.extractor.update_all_episodes(info)
             if new_info:
@@ -176,6 +197,20 @@ class ScrapeWorker(QRunnable):
                         chapter)
                 new_info['episodes_updated'] = True
                 info.update(new_info)
+
+        return info
+
+    async def update_episodes_selected(self, url_list: list[str], info: dict):
+        if hasattr(self.extractor, 'update_episodes_selected') \
+                and callable(self.extractor.update_episodes_selected):
+            self.logger.info(
+                f"Updating {len(url_list)} episodes for {info.get('drama_title')}")
+            info = await self.extractor.update_episodes_selected(url_list, info)
+            if info and not hasattr(self.extractor, "_EXTENDS_NAME"):
+                has_all_video_url = all(bool(self.extractor.get_video_url_play(
+                    chapter)) for chapter in info["chapterList"])
+                if has_all_video_url:
+                    info['episodes_updated'] = True
 
         return info
 
@@ -207,20 +242,33 @@ class ScrapeWorker(QRunnable):
             if hasattr(self.extractor, 'get_profile_info'):
                 self.extractor.on_extracting = self.on_extracting
 
-            if isinstance(self._info, dict) and not self.more:
-                info = await self.update_all_episodes(self._info.copy())
+            if self.refresh_build_id_key:
+                build_id = self.extractor._get_build_id()
+                CACHE_DRAMA[self.refresh_build_id_key] = self.extractor._BUILD_ID
+
+                return
+
+            if isinstance(self._info, dict) and self.mode == "update":
+                if self.url_episodes_selected:
+                    info = await self.update_episodes_selected(self.url_episodes_selected, self._info.copy())
+                    self.url_episodes_selected = None
+                else:
+                    info = await self.update_all_episodes(self._info.copy())
                 self._info = None
+                self.mode = "normal"
                 return info
 
             self.extractor.set_test_mode(True)
             # info = await self.extractor.test_get_drama_info(self.url)
-            info = self.extractor.load_test_data('_drama')
+            # info = self.extractor.load_test_data('_drama')
+            info = self._info.copy() if isinstance(self._info, dict) else None
             if not info:
                 if hasattr(self.extractor, 'get_profile_info'):
                     limit = self.options["limit"]
                     self.options = self.extractor.get_next_options(
                         more=self.more)
-                    self.options["limit"] = limit
+                    if self.more == 'all':
+                        self.options["limit"] = limit
                     info = await self.extractor.get_profile_info(
                         self.url,
                         **self.options
@@ -229,21 +277,24 @@ class ScrapeWorker(QRunnable):
                     info = await self.extractor.get_drama_info(self.url)
                 if info:
                     self.extractor.save_test_data(info, '_drama')
-            elif isinstance(self._info, dict):
-                chapter_list = self._info.get("chapterList")
+            elif isinstance(info, dict):
+                chapter_list = info.get("chapterList")
                 if self.more and chapter_list:
                     limit = self.options["limit"]
                     self.options = self.extractor.get_next_options(
                         chapter_list, more=self.more)
-                    self.options["limit"] = limit
-                    logger.debug(f"options: {self.options}")
+                    if self.more == 'all':
+                        self.options["limit"] = limit
+                    self.logger.debug(f"options: {self.options}")
                     _info = await self.extractor.get_profile_info(
                         self.url,
                         **self.options
                     )
                     if _info and _info.get("chapterList"):
-                        self._info["chapterList"].extend(_info["chapterList"])
-                        info = self._info.copy()
+                        info["chapterList"].extend(_info["chapterList"])
+
+            if isinstance(info, dict):
+                self._info = info.copy()
 
             return info
 
@@ -258,9 +309,13 @@ class ScrapeWorker(QRunnable):
             if isinstance(info, dict):
                 self.signals.finished.emit(info, self.info_key)
             else:
+                if self.refresh_build_id_key:
+                    self.refresh_build_id_key = None
+                    self.signals.finished.emit(None, self.info_key)
+                    return
                 self.signals.error.emit("Failed to scrape drama info")
         except Exception as e:
-            logger.error(f"ScrapeWorker error: {e}")
+            self.logger.error(f"ScrapeWorker error: {e}")
             self.signals.error.emit(str(e))
 
 
@@ -274,12 +329,17 @@ class DownloadSignals(QObject):
 class DramaDownloadWorker(QRunnable):
     """Worker task to run async YoutubeDL in the background"""
 
-    def __init__(self, extractor: TYPE_DRAMA_EXTRACTOR, info, output_dir):
+    def __init__(self, extractor: TYPE_DRAMA_EXTRACTOR, info, output_dir, tab_id: Optional[str] = None):
         super().__init__()
         self.extractor = copy.copy(extractor) if extractor else None
         self.info = info
         self.output_dir = output_dir
         self.signals = DownloadSignals()
+        self.tab_id = tab_id
+        self.logger = logger.bind(tab_id=self.tab_id)
+        if self.extractor:
+            self.extractor.logger = self.extractor.logger.bind(
+                tab_id=self.tab_id)
 
     def on_progress_callback(self, data: "ProgressData"):
         self.signals.progress.emit({
@@ -323,7 +383,7 @@ class DramaDownloadWorker(QRunnable):
             if isinstance(data, dict):
                 self.signals.finished.emit(data)
         except Exception as e:
-            logger.error(f"Download error: {e}")
+            self.logger.error(f"Download error: {e}")
             self.signals.error.emit(str(e))
 
 
@@ -395,6 +455,8 @@ class ImageLoaderLabel(QLabel):
         if not url_str:
             self._set_placeholder()
             return
+
+        self.setText("Loading...")
 
         if self.hash_url(url_str) in self._cache:
             pixmap = self._cache[self.hash_url(url_str)]
@@ -538,11 +600,14 @@ class DramaSidebar(ScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent_downloader = parent
+        self.logger = logger.bind(
+            tab_id=parent.objectName() if parent else None)
         self.setFixedWidth(300)
         self.view = CardWidget(self, Colors.gray_0, DarkMode.card)
         self.vBoxlayout = QVBoxLayout(self.view)
         self.vBoxlayout.setContentsMargins(15, 15, 15, 15)
-        self.vBoxlayout.setSpacing(15)
+        self.vBoxlayout.setSpacing(4)
 
         # Large Poster
         self.poster = ImageLoaderLabel("Drama Poster", self)
@@ -557,9 +622,21 @@ class DramaSidebar(ScrollArea):
             f"border-radius: 12px; background-color: {Colors.alpha(Colors.gray_6, 0.4)}; font-size: 20px; font-weight: bold; color: gray; border: 2px solid {self.poster_border_color};")
         self.vBoxlayout.addWidget(self.poster, 0, Qt.AlignCenter)
 
+        self.play_btn_container = QWidget(self)
+        self.play_btn_container.hide()
+        self.play_btn_container.setStyleSheet("background-color: transparent;")
+        self.play_btn_container_layout = QHBoxLayout(self.play_btn_container)
+        self.play_btn_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.play_btn_container_layout.setSpacing(10)
+
         self.play_btn = PrimaryPushButton("Play", self)
-        self.play_btn.hide()
-        self.vBoxlayout.addWidget(self.play_btn)
+        self.play_btn_container_layout.addWidget(self.play_btn)
+        self.vBoxlayout.addWidget(self.play_btn_container)
+
+        self.check_video_btn = ToolButton(FluentIcon.ROTATE, self)
+        self.check_video_btn.setToolTip("Check Video")
+        self.play_btn_container_layout.addWidget(self.check_video_btn)
+        self.check_video_btn.hide()
 
         # Scroll area to handle long titles
         self.title_scroll = ScrollArea(self)
@@ -644,11 +721,16 @@ class DramaSidebar(ScrollArea):
         self.path_edit.setReadOnly(True)
         self.path_edit.textChanged.connect(self.path_changed)
 
+        self.open_folder_btn = ToolButton(FluentIcon.LINK, self)
+        self.open_folder_btn.setToolTip("Open Download Directory")
+        self.open_folder_btn.clicked.connect(self.open_directory)
+
         self.browse_btn = PushButton("Browse", self)
         self.browse_btn.setToolTip("Select Directory")
         self.browse_btn.clicked.connect(self.browse_path)
 
         self.path_layout.addWidget(self.path_edit)
+        self.path_layout.addWidget(self.open_folder_btn)
         self.path_layout.addWidget(self.browse_btn)
         self.vBoxlayout.addLayout(self.path_layout)
 
@@ -667,6 +749,7 @@ class DramaSidebar(ScrollArea):
         # show scroll bar on hover
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+        self.check_video_btn.clicked.connect(self.check_video)
         self.play_btn.clicked.connect(self.play_video)
         self.download_btn.clicked.connect(self.download_selected)
         self.cancel_btn.clicked.connect(self.cancel_all)
@@ -706,9 +789,26 @@ class DramaSidebar(ScrollArea):
 
     def show_play_btn(self):
         if hasattr(self.extractor, '_EXTENDS_NAME'):
-            self.play_btn.show()
+            self.play_btn_container.show()
         else:
-            self.play_btn.hide()
+            self.play_btn_container.hide()
+
+    def open_directory(self):
+        if not self.current_selected_chapter:
+            return
+
+        output_file = self.current_selected_chapter.get('output_file')
+        if output_file:
+            path = Path(output_file)
+        else:
+            path = Path(self.path_edit.text()) / \
+                safe_filename(self.title.text())
+
+        if path and path.exists():
+            if output_file:
+                reveal_file(str(path))
+            else:
+                os.startfile(str(path))
 
     def browse_path(self):
         path = QFileDialog.getExistingDirectory(self, "Select Directory")
@@ -719,6 +819,33 @@ class DramaSidebar(ScrollArea):
     def path_changed(self, text):
         self.path_edit.setToolTip(text)
 
+    def check_video(self):
+        if not self.current_selected_chapter:
+            return
+        chapter = self.current_selected_chapter.copy()
+        if chapter.get('sd') and chapter.get('hd'):
+            return
+
+        url = chapter.get('url')
+        if not url:
+            self.logger.warning("[!] ⚠️ Video URL not found")
+            return
+
+        update_worker = ScrapeWorker(
+            self.extractor, '', self.info.get('info_key', ''), tab_id=self.parent_downloader.objectName())
+        update_worker._info = self.info.copy()
+        update_worker.mode = "update"
+        update_worker.url_episodes_selected = [url]
+        if hasattr(self.extractor, 'update_episodes_selected') \
+                and callable(self.extractor.update_episodes_selected):
+            self.update_info_workers.add(update_worker)  # Register worker
+            update_worker.signals.finished.connect(
+                lambda i, k, w=update_worker: self._on_update_info_finished(i, k, self.extractor, w, download=False))
+            update_worker.signals.error.connect(
+                lambda e, w=update_worker: self._on_update_info_error(e, w))
+            QThreadPool.globalInstance().start(update_worker)
+            return
+
     def play_video(self):
         dialog = VideoPlayerDialog(self.window())
         if not self.current_selected_chapter:
@@ -727,8 +854,11 @@ class DramaSidebar(ScrollArea):
         video_url = self.extractor.get_video_url_play(
             self.current_selected_chapter)
         if not video_url:
-            logger.warning("Video URL not found")
+            self.check_video_btn.show()
+            self.logger.warning("[!] ⚠️ Video URL not found")
             return
+        if not self.check_video_btn.isHidden():
+            self.check_video_btn.hide()
 
         if 'width' in self.current_selected_chapter and 'height' in self.current_selected_chapter:
             width = self.current_selected_chapter['width']
@@ -759,28 +889,37 @@ class DramaSidebar(ScrollArea):
                     selected_chapters.append(self.info['chapterList'][i])
 
         if not selected_chapters:
-            logger.warning("No episodes selected for download.")
+            self.logger.warning("No episodes selected for download.")
             return
 
-        update_workder = ScrapeWorker(
-            self.extractor, '', self.info.get('info_key', ''))
-        update_workder._info = self.info.copy()
+        update_worker = ScrapeWorker(
+            self.extractor, '', self.info.get('info_key', ''), tab_id=self.parent_downloader.objectName())
+        update_worker._info = self.info.copy()
+        update_worker.mode = "update"
         has_episodes_updated = self.info.get('episodes_updated', False)
         if not has_episodes_updated \
                 and hasattr(self.extractor, 'update_all_episodes') \
                 and callable(self.extractor.update_all_episodes):
-            self.update_info_workers.add(update_workder)  # Register worker
+            has_episodes_selected_func = hasattr(
+                self.extractor, 'update_episodes_selected')
+            if has_episodes_selected_func and len(selected_chapters) == len(self.info.get('chapterList', [])):
+                update_worker.url_episodes_selected = None
+            else:
+                update_worker.url_episodes_selected = [
+                    chapter['chapter_id'] for chapter in selected_chapters]
 
-            update_workder.signals.finished.connect(
-                lambda i, k, w=update_workder: self._on_update_info_finished(i, k, self.extractor, w))
-            update_workder.signals.error.connect(
-                lambda e, w=update_workder: self._on_update_info_error(e, w))
-            QThreadPool.globalInstance().start(update_workder)
+            self.update_info_workers.add(update_worker)  # Register worker
+
+            update_worker.signals.finished.connect(
+                lambda i, k, w=update_worker: self._on_update_info_finished(i, k, self.extractor, w))
+            update_worker.signals.error.connect(
+                lambda e, w=update_worker: self._on_update_info_error(e, w))
+            QThreadPool.globalInstance().start(update_worker)
             return
 
         self._download_selected(selected_chapters)
 
-    def _on_update_info_finished(self, info, info_key, extractor: TYPE_DRAMA_EXTRACTOR, worker=None):
+    def _on_update_info_finished(self, info, info_key, extractor: TYPE_DRAMA_EXTRACTOR, worker=None, download=True):
         """
         Callback for successful scrape completion
         """
@@ -790,6 +929,9 @@ class DramaSidebar(ScrollArea):
         if worker and worker in self.update_info_workers:
             self.update_info_workers.remove(worker)
 
+        if not download:
+            return
+
         downloader = self.parent()
         selected_chapters = []
         for i, btn in enumerate(downloader.ep_buttons):
@@ -798,7 +940,7 @@ class DramaSidebar(ScrollArea):
                     selected_chapters.append(self.info['chapterList'][i])
 
         if not selected_chapters:
-            logger.warning("No episodes selected for download.")
+            self.logger.warning("No episodes selected for download.")
             return
 
         self._download_selected(selected_chapters)
@@ -810,20 +952,21 @@ class DramaSidebar(ScrollArea):
         if worker and worker in self.update_info_workers:
             self.update_info_workers.remove(worker)
 
-        logger.error(f"Failed to scrape drama info: {error}")
+        self.logger.error(f"Failed to update info: {error}")
 
     def _download_selected(self, selected_chapters):
         # Create a copy of info with only selected chapters to avoid caching issues
         download_info = self.info.copy()
         download_info['chapterList'] = selected_chapters
 
-        logger.info(
+        self.logger.info(
             f"Downloading {len(selected_chapters)} selected episodes...")
 
         worker = DramaDownloadWorker(
             self.extractor,
             download_info,
             self.output_dir,
+            tab_id=self.parent_downloader.objectName()
         )
         self.download_workers.add(worker)
 
@@ -850,7 +993,7 @@ class DramaSidebar(ScrollArea):
         """
         Callback for successful download completion
         """
-        logger.info(
+        self.logger.info(
             f"✅ Download finished: {len(data['success'])} success, {len(data['failed'])} failed")
         if 'info' in data and isinstance(data['info'], dict):
             info = data['info']
@@ -866,7 +1009,7 @@ class DramaSidebar(ScrollArea):
         """
         Callback for download errors
         """
-        logger.error(f"Download error: {error_info}")
+        self.logger.error(f"Download error: {error_info}")
         if worker and worker in self.download_workers:
             self.download_workers.remove(worker)
 
@@ -889,15 +1032,15 @@ class DramaSidebar(ScrollArea):
             speed_str = self.format_speed(speed)
             eta_str = self.format_eta(eta)
 
-            logger.info(
+            self.logger.info(
                 f"Progress: {downloaded}/{total} ({downloaded/total*100:.2f}%)")
-            logger.info(f"Speed: {speed_str}")
-            logger.info(f"ETA: {eta_str}")
+            self.logger.info(f"Speed: {speed_str}")
+            self.logger.info(f"ETA: {eta_str}")
         elif d['status'] == 'finished':
-            logger.info(f"Finished: {d['filename']}")
+            self.logger.info(f"Finished: {d['filename']}")
 
     def cancel_all(self):
-        logger.info("Canceling all downloads...")
+        self.logger.info("Canceling all downloads...")
         if self.selected_count.text() == "0\nSelected" or not self.extractor:
             return
 
@@ -928,7 +1071,7 @@ class DramaDownloader(QWidget):
         self.setObjectName(object_name)
         self.info_key = None
 
-        self.logger = logger
+        self.logger = logger.bind(tab_id=object_name)
         self.sink_id = None
         self.scrape_workers = set()  # Registry to keep worker references alive
         self.main_layout = QHBoxLayout(self)
@@ -1016,27 +1159,27 @@ class DramaDownloader(QWidget):
         self.view_more_widget = QWidget()
         self.view_more_layout = QHBoxLayout(self.view_more_widget)
         self.view_more_limit = NumberInput(self)
-        self.view_more_limit.setValue(100)
+        self.view_more_limit.setValue(30)
         self.view_more_limit.setMinimumWidth(80)
         self.view_more_limit.setMinimum(0)
         self.view_more_limit.setMaximum(5000)
         self.view_more_limit.setSymbolVisible(False)
         self.view_more_btn = PrimaryPushButton("View More", self)
         self.view_all_btn = PrimaryPushButton("View All", self)
-        self.view_more_stop_btn = PrimaryPushButton("Stop", self)
-        self.view_more_stop_btn.setStyleSheet(
-            f"{self.view_more_stop_btn.styleSheet()}PrimaryPushButton{{background-color: {Colors.red_6}; color: {Colors.gray_9}; border-color: {Colors.red_5};}}PrimaryPushButton::hover{{background-color: {Colors.red_5}; border-color: {Colors.red_5};}}"
-        )
+
+        class PrimaryPushButtonCustom(PrimaryPushButton):
+            def setStyleSheet(self, styleSheet: str, /) -> None:
+                styleSheet = f"{styleSheet}PrimaryPushButton{{background-color: {Colors.red_6}; color: {Colors.gray_7}; border-color: {Colors.red_4}; border-bottom-color: {Colors.dark_3};}}PrimaryPushButton::hover{{background-color: {Colors.red_5}; border-color: {Colors.red_5}; border-bottom-color: {Colors.dark_3};}}"
+                return super().setStyleSheet(styleSheet)
+
+        self.view_more_stop_btn = PrimaryPushButtonCustom("Stop", self)
         self.view_more_layout.addStretch(1)
         self.view_more_layout.addWidget(self.view_more_limit)
         self.view_more_layout.addWidget(self.view_more_btn)
         self.view_more_layout.addWidget(self.view_all_btn)
         self.view_more_layout.addWidget(self.view_more_stop_btn)
         self.content_area.addWidget(self.view_more_widget)
-        self.is_profile_page = next(
-            (True for name in BASEIE_PROFILES if name in object_name.lower()), False)
-        if not self.is_profile_page:
-            self.view_more_widget.hide()
+        self.view_more_widget.hide()
 
         # 2.5 Bottom Log and Progress
         self.log_area = QVBoxLayout()
@@ -1062,6 +1205,8 @@ class DramaDownloader(QWidget):
         self.sink_id = self.logger.add(
             self.scroll_to_bottom,
             level="INFO",
+            filter=lambda record: record["extra"].get(
+                "tab_id") == self.objectName(),
             format="[{time:HH:mm:ss}] {message}",
         )
         self.clear_btn.clicked.connect(
@@ -1079,6 +1224,13 @@ class DramaDownloader(QWidget):
 
         # self.test_show_episodes("Heart Thief", 70)
         self.content_area.addLayout(self.log_area)
+
+    def is_profile_page(self):
+        object_name = self.objectName().lower()
+        if object_name.startswith("all"):
+            object_name = urlparse(self.url_edit.text()).netloc.lower()
+        return next(
+            (True for name in BASEIE_PROFILES if name in object_name), False)
 
     def cleanup(self):
         # 1. Clean up sidebar workers and poster tasks
@@ -1192,14 +1344,14 @@ class DramaDownloader(QWidget):
             self.ep_buttons.append(btn)
 
     def on_view_more_episodes(self):
-        if not self.is_profile_page or not self.info_key:
+        if not self.is_profile_page() or not self.info_key:
             return
 
         self.view_more_episode = "next"
         self.scrape_episode()
 
     def on_view_all_episodes(self):
-        if not self.is_profile_page or not self.info_key:
+        if not self.is_profile_page() or not self.info_key:
             return
 
         self.view_more_episode = "all"
@@ -1230,10 +1382,18 @@ class DramaDownloader(QWidget):
         if not self.sidebar.info.get('chapterList'):
             return
 
+        info = self.sidebar.info
         if not hasattr(self.sidebar.extractor, '_EXTENDS_NAME'):
+            if selected > 0:
+                for i, btn in enumerate(self.ep_buttons):
+                    if btn.isChecked():
+                        if i < len(info.get('chapterList', [])):
+                            self.sidebar.current_selected_chapter = info['chapterList'][i]
+                        break
+            else:
+                self.sidebar.current_selected_chapter = None
             return
 
-        info = self.sidebar.info
         if selected > 0:
             self.sidebar.show_play_btn()
             for i, btn in enumerate(self.ep_buttons):
@@ -1246,7 +1406,7 @@ class DramaDownloader(QWidget):
             self.sidebar.poster.loadImage(
                 self.sidebar.current_selected_chapter.get('thumbnail', ''))
         else:
-            self.sidebar.play_btn.hide()
+            self.sidebar.play_btn_container.hide()
             self.sidebar.current_selected_chapter = None
             _prev_title = self.sidebar.title.text()
             self.sidebar.title.setText(info.get('drama_title') or _prev_title)
@@ -1319,8 +1479,22 @@ class DramaDownloader(QWidget):
             build_id_key = extractor_name + '-build-id'
             build_id = CACHE_DRAMA.get(build_id_key)
             if build_id is None:
-                build_id = extractor._get_build_id()
-                CACHE_DRAMA[build_id_key] = extractor._BUILD_ID
+                worker = ScrapeWorker(extractor, url, "",
+                                      tab_id=self.objectName())
+                worker.refresh_build_id_key = build_id_key
+                self.scrape_workers.add(worker)
+
+                def _on_scrape_finished(worker=None):
+                    if worker and worker in self.scrape_workers:
+                        self.scrape_workers.remove(worker)
+
+                    self._get_drama_info(url)
+
+                worker.signals.finished.connect(
+                    lambda: _on_scrape_finished(worker))
+                worker.signals.error.connect(self._on_scrape_error)
+                QThreadPool.globalInstance().start(worker)
+                return
             else:
                 extractor._BUILD_ID = build_id
             self.logger.debug(f"build_id: {extractor._BUILD_ID}")
@@ -1357,7 +1531,8 @@ class DramaDownloader(QWidget):
             self.loading_bar.move(x, y)
             self.loading_bar.show()
 
-            worker = ScrapeWorker(extractor, url, info_key)
+            worker = ScrapeWorker(extractor, url, info_key,
+                                  tab_id=self.objectName())
             if self.view_more_episode:
                 worker._info = info
                 worker.more = self.view_more_episode or "next"
@@ -1398,6 +1573,11 @@ class DramaDownloader(QWidget):
     def _on_scrape_finished(self, info, info_key, extractor: TYPE_DRAMA_EXTRACTOR, worker=None):
         """Callback when scraping is complete"""
         self.view_more_episode = None
+        if not self.is_profile_page():
+            self.view_more_widget.hide()
+        else:
+            self.view_more_widget.show()
+
         if worker and worker in self.scrape_workers:
             self.scrape_workers.remove(worker)  # Unregister
 
