@@ -3,6 +3,7 @@ import itertools
 import json
 import random
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
@@ -756,8 +757,8 @@ class KuaishouExtractor(KuaishouBaseIE):
                     self.logger.error(f"[!] No response from {url}")
                     continue
 
-                # self.logger.debug(f"[*] Cookies: {resp.cookies}")
-                # self.save_html_text(resp.text)
+                self.logger.debug(f"[*] Cookies: {resp.cookies}")
+                self.save_html_text(resp.text, f"_{video_id}")
                 if resp.status_code == 200:
                     return (video_id, resp.text)
 
@@ -987,13 +988,17 @@ class KuaishouExtractor(KuaishouBaseIE):
             "Referer": profile_url
         }
 
+        cookies = self.parse_cookies(self.cookies)
         if isinstance(self.cookies, str):
             headers["Cookie"] = self.cookies
         else:
             headers["Cookie"] = "; ".join(
                 [f"{k}={v}" for k, v in self.cookies.items()])
 
-        cookies = self.parse_cookies(self.cookies)
+        if cookies.get("kwfv1"):
+            headers["kww"] = cookies["kwfv1"]
+
+        self.logger.debug(f"[*] Cookies: {cookies}")
 
         pcursor = cursor_continue if cursor_continue and cursor_continue != '' \
             else ""
@@ -1026,7 +1031,7 @@ class KuaishouExtractor(KuaishouBaseIE):
                 method="POST",
                 headers=headers,
                 json_data=body,
-                cookies=cookies,
+                # cookies=cookies,
             )
 
             if not isinstance(resp, Response):
@@ -1038,6 +1043,16 @@ class KuaishouExtractor(KuaishouBaseIE):
                 self.save_test_data(data, suffix="_user_test")
                 node_list = data.get('feeds', [])
                 if not node_list:
+                    expiration_ms = int(cookies.get("didv", 0))
+                    if expiration_ms > 0:
+                        expiration_seconds = expiration_ms / 1000
+
+                        expiration_date = datetime.fromtimestamp(
+                            expiration_seconds)
+                        current_date = datetime.now()
+                        if current_date > expiration_date:
+                            self.logger.error(
+                                "[!] ⚠️ Session has been expired")
                     break
 
                 next_pcursor = data.get("pcursor", "")

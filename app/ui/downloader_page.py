@@ -367,14 +367,14 @@ class DownloaderPage(ScrollArea):
                     manager.redownload_task(item.data(Qt.UserRole))
 
     def on_download_success(self, task_id, filepath):
-        basename = Path(filepath).name
-        InfoBar.success(
-            "Download Complete", f"File: {basename}", orient=Qt.Vertical, duration=3500, position=InfoBarPosition.BOTTOM, parent=self.window())
+        # basename = Path(filepath).name
+        # # InfoBar.success(
+        # #     "Download Complete", f"File: {basename}", orient=Qt.Vertical, duration=3500, position=InfoBarPosition.BOTTOM, parent=self)
         self.filter_tasks()
 
     def on_download_error(self, task_id, error_msg):
         InfoBar.error(
-            "Download Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=3500, position=InfoBarPosition.BOTTOM, parent=self.window())
+            "Download Error", f"Error: {error_msg}", orient=Qt.Vertical, duration=3500, position=InfoBarPosition.BOTTOM, parent=self)
         self.filter_tasks()
 
     def _close_loading_bar(self, status: str = "progress", title=None):
@@ -389,13 +389,16 @@ class DownloaderPage(ScrollArea):
                 self.loading_bar.setTitle("Scraped error ❌")
             self.loading_bar.setContent("")
             self.loading_bar.setState(True)
-        self.loading_bar = None
+            self.loading_bar = None
 
     def _show_loading_bar(self, title: str, content: str):
+        if self.loading_bar:
+            return
+
         self.loading_bar = StateToolTip(
             title,
             content,
-            self.window()
+            self
         )
         # move to bottom center
         window_width = self.window().width()
@@ -403,7 +406,7 @@ class DownloaderPage(ScrollArea):
         tooltip_width = self.loading_bar.width()
         tooltip_height = self.loading_bar.height()
         x = (window_width - tooltip_width) // 2
-        y = window_height - tooltip_height - 30
+        y = window_height - tooltip_height - 60
         self.loading_bar.move(x, y)
         self.loading_bar.show()
 
@@ -419,7 +422,7 @@ class DownloaderPage(ScrollArea):
                 logger.debug(f"Scrape error: {e}")
         elif data['status'] == 'progress':
             try:
-                self._close_loading_bar()
+                # self._close_loading_bar()
                 url = data['original_url'] if data.get(
                     'original_url') else data['url']
                 self._show_loading_bar(
@@ -454,7 +457,11 @@ class DownloaderPage(ScrollArea):
                 new_task_id = manager.add_task(
                     url, filename, options['path'],
                     category=options['category'], info=info,
-                    options=options
+                    options={
+                        **options,
+                        "width": int(info.get('width') or 0),
+                        "height": int(info.get('height') or 0),
+                    }
                 )
                 task_data = {
                     'id': new_task_id, 'url': url, 'filename': filename,

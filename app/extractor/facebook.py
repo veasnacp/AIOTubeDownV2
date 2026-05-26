@@ -619,9 +619,12 @@ class FacebookExtractor(FacebookBaseIE):
                 except ValueError as err:
                     self.logger.debug(f'error: {err}')
                     pass
+            username = user.get("username", "")
+            if username == "people":
+                username = f"{user.get('name', '')}-{user.get('id', '')}"
             video_info.update(**{
                 "url": self._LINK_VIDEO_WITH % video_id,
-                "uploader": user.get("username", ""),
+                "uploader": username,
                 "uploader_id": user.get("id", ""),
                 "uploader_url": user.get("url", ""),
             })

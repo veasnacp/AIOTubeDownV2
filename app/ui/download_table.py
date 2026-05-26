@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import subprocess
@@ -146,10 +147,21 @@ class DownloadTable(TableWidget):
 
         menu.exec(event.globalPos())
 
-    def play_video(self, file_path: str):
+    def play_video(self, file_path: str, metadata: dict = None):
         dialog = VideoPlayerDialog(self.window())
 
-        dialog.resizePortrait()
+        has_resolution = metadata and metadata.get(
+            "width") and metadata.get("height")
+        if has_resolution:
+            width = metadata.get("width") or 0
+            height = metadata.get("height") or 0
+            if width < height:
+                dialog.resizePortrait()
+            else:
+                dialog.resizeLandscape()
+        else:
+            dialog.resizePortrait()
+
         dialog.setVideo(file_path)
         dialog.play()
         dialog.show()
@@ -157,12 +169,15 @@ class DownloadTable(TableWidget):
     def _open_file(self, task_id):
         conn = db.get_connection()
         row = conn.execute(
-            "SELECT filename, save_path FROM downloads WHERE id=?", (task_id,)).fetchone()
+            "SELECT filename, save_path, metadata_json FROM downloads WHERE id=?", (task_id,)).fetchone()
         conn.close()
         if row and row[1] and row[0]:
             path = os.path.join(row[1], row[0])
+            metadata = None
+            if row[2]:
+                metadata = json.loads(row[2])
             if os.path.exists(path):
-                self.play_video(path)
+                self.play_video(path, metadata)
                 # os.startfile(path)
 
     def _open_with(self, task_id):

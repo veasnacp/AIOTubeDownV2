@@ -1330,6 +1330,9 @@ class RushShortsTvExtractor(DramaExtractorBase):
             return self._get_abs_media(path)
         return None
 
+    def get_chapter_id(self, chapter: dict):
+        return chapter.get('episodeSort') or ''
+
     async def get_drama_info(self, url: str) -> Optional[Dict[str, Any]]:
         """Fetch drama info from RushTv."""
         url, drama_id = self.get_drama_id(url)
@@ -1504,6 +1507,9 @@ class StardustTvExtractor(DramaExtractorBase):
                 path = path[:-5] + ".m3u8"
             return f"{self._BASE_CDN_VIDEO}{quote(path)}"
         return None
+
+    def get_chapter_id(self, chapter: dict):
+        return chapter.get('sort') or ''
 
     @staticmethod
     def _extract_nuxt_raw(html_text):

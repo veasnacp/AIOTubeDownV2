@@ -39,6 +39,8 @@ from PySide6Addons import (
     CaptionLabel,
     FlowLayout,
     FluentIcon,
+    InfoBar,
+    InfoBarPosition,
     LineEdit,
     MenuIndicatorType,
 )
@@ -738,6 +740,7 @@ class DramaSidebar(ScrollArea):
         self.download_btn = PrimaryPushButton(
             FluentIcon.DOWNLOAD, "Download Selected", self)
         self.cancel_btn = PushButton("Cancel", self)
+        self.cancel_btn.setToolTip("Cancel Download")
 
         self.btn_action_layout.addWidget(self.cancel_btn)
         self.btn_action_layout.addWidget(self.download_btn)
@@ -906,7 +909,10 @@ class DramaSidebar(ScrollArea):
                 update_worker.url_episodes_selected = None
             else:
                 update_worker.url_episodes_selected = [
-                    chapter['chapter_id'] for chapter in selected_chapters]
+                    chapter.get(
+                        'chapter_id') or self.extractor.get_chapter_id(chapter)
+                    for chapter in selected_chapters
+                ]
 
             self.update_info_workers.add(update_worker)  # Register worker
 
@@ -1158,6 +1164,7 @@ class DramaDownloader(QWidget):
         self.view_more_episode: Optional[str] = None
         self.view_more_widget = QWidget()
         self.view_more_layout = QHBoxLayout(self.view_more_widget)
+        self.view_more_layout.setContentsMargins(0, 0, 0, 0)
         self.view_more_limit = NumberInput(self)
         self.view_more_limit.setValue(30)
         self.view_more_limit.setMinimumWidth(80)
@@ -1188,8 +1195,10 @@ class DramaDownloader(QWidget):
         self.log_area.addWidget(self.progress_bar)
 
         log_header = QHBoxLayout()
-        log_header.addWidget(CaptionLabel("Log", self))
+        log_header.setContentsMargins(0, 0, 0, 0)
+        log_header.setSpacing(8)
         log_header.addStretch(1)
+        log_header.addWidget(CaptionLabel("Log", self))
         self.clear_btn = TransparentToolButton(FluentIcon.DELETE, self)
         log_header.addWidget(self.clear_btn)
         self.log_area.addLayout(log_header)
@@ -1436,6 +1445,17 @@ class DramaDownloader(QWidget):
             self.loading_bar = None
 
     def scrape_episode(self):
+        if self.scrape_workers:
+            InfoBar.warning(
+                title="Scraping in progress",
+                content="A scraping operation is already running. Please wait or click Stop to cancel.",
+                orient=Qt.Horizontal,
+                duration=3000,
+                position=InfoBarPosition.BOTTOM,
+                parent=self
+            )
+            return
+
         url = self.url_edit.text()
         if not url:
             self.logger.error("[!] ❌ URL is empty")
@@ -1516,20 +1536,8 @@ class DramaDownloader(QWidget):
         if info and not self.view_more_episode:
             self._on_scrape_finished(info, info_key, extractor)
         else:
-            self.loading_bar = StateToolTip(
-                f"Scraping data from {urlparse(url).path.split('/')[-1]}",
-                'Please wait...',
-                self.window()
-            )
-            # move to bottom center
-            window_width = self.window().width()
-            window_height = self.window().height()
-            tooltip_width = self.loading_bar.width()
-            tooltip_height = self.loading_bar.height()
-            x = (window_width - tooltip_width) // 2
-            y = window_height - tooltip_height - 30
-            self.loading_bar.move(x, y)
-            self.loading_bar.show()
+            self._show_loading_bar(
+                f"Scraping data from {urlparse(url).path.split('/')[-1]}", 'Please wait...')
 
             worker = ScrapeWorker(extractor, url, info_key,
                                   tab_id=self.objectName())
@@ -1570,6 +1578,32 @@ class DramaDownloader(QWidget):
                 new_count = len(info["chapterList"])
                 self.append_new_episodes(old_count + 1, new_count)
 
+    def _show_loading_bar(self, title: str, content: str):
+        if self.loading_bar:
+            return
+
+        self.loading_bar = StateToolTip(
+            title,
+            content,
+            self
+        )
+        # move to bottom center
+        window_width = self.window().width()
+        window_height = self.window().height()
+        tooltip_width = self.loading_bar.width()
+        tooltip_height = self.loading_bar.height()
+        x = (window_width - tooltip_width) // 2
+        y = window_height - tooltip_height - 30
+        self.loading_bar.move(x, y)
+        self.loading_bar.show()
+
+    def _close_loading_bar(self):
+        if self.loading_bar:
+            self.loading_bar.setTitle("Scraped successfully ✅")
+            self.loading_bar.setContent("")
+            self.loading_bar.setState(True)
+            self.loading_bar = None
+
     def _on_scrape_finished(self, info, info_key, extractor: TYPE_DRAMA_EXTRACTOR, worker=None):
         """Callback when scraping is complete"""
         self.view_more_episode = None
@@ -1581,14 +1615,7 @@ class DramaDownloader(QWidget):
         if worker and worker in self.scrape_workers:
             self.scrape_workers.remove(worker)  # Unregister
 
-        def on_closed():
-            if self.loading_bar:
-                self.loading_bar.setTitle("Scraped successfully ✅")
-                self.loading_bar.setContent("")
-                self.loading_bar.setState(True)
-                self.loading_bar = None
-
-        QTimer.singleShot(1000, on_closed)
+        QTimer.singleShot(1000, self._close_loading_bar)
 
         if not isinstance(info, dict):
             self._on_scrape_error("Invalid drama data received")
@@ -1620,12 +1647,10 @@ class DramaDownloader(QWidget):
         if worker and worker in self.scrape_workers:
             self.scrape_workers.remove(worker)  # Unregister
 
-        if hasattr(self, 'loading_bar'):
-            self.loading_bar = None
-
         self.empty_eps_label.setText(self.empty_eps_not_found)
         self.stackWidget.setCurrentWidget(self.empty_eps_widget)
         self.logger.error(f"Scrape error: {error_msg}")
+        QTimer.singleShot(1000, self._close_loading_bar)
 
 
 class TabBarComponent(TabBar):

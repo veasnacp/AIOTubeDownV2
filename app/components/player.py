@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from PySide6.QtCore import QEvent, Qt, QUrl
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QAbstractButton, QAbstractSlider, QDialog, QWidget
-from PySide6Addons import isDarkTheme
+from PySide6Addons import BodyLabel, FluentIcon, QObject, ToggleToolButton, isDarkTheme
 from PySide6Addons.multimedia import VideoWidget
 
 from ..theme import DarkMode, LightMode
@@ -25,6 +25,22 @@ class VideoPlayerDialog(QDialog):
         self.videoWidget.player.mediaStatusChanged.connect(
             self._on_media_status_changed)
 
+        # Beautiful loading overlay label
+        self.loadingLabel = BodyLabel(self)
+        self.loadingLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.loadingLabel.setText("Loading Media...")
+        self.loadingLabel.setStyleSheet(f"""
+            QLabel {{
+                color: #FFFFFF;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
+                font-size: 16px;
+                font-weight: bold;
+                background-color: rgba(0, 0, 0, 0.7);
+                border-radius: 12px;
+            }}
+        """)
+        self.loadingLabel.hide()
+
         self.setMinimumWidth(450)
         self.videoWidget.setMinimumWidth(450)
         self._drag_pos = None
@@ -40,10 +56,15 @@ class VideoPlayerDialog(QDialog):
         # Install event filter to recursively capture drag events on children
         self._setup_drag_filter()
 
+    def closeEvent(self, event):
+        self.stop()
+        super().closeEvent(event)
+
     def _setup_drag_filter(self):
         self.videoWidget.installEventFilter(self)
         for child in self.videoWidget.findChildren(QWidget):
             child.installEventFilter(self)
+        self.loadingLabel.installEventFilter(self)
 
     def enterEvent(self, event):
         super().enterEvent(event)
@@ -52,13 +73,21 @@ class VideoPlayerDialog(QDialog):
         self.videoWidget.playBar.fadeIn()
         super().leaveEvent(event)
 
-    def eventFilter(self, obj, event) -> bool:
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         # Ignore clicks/drags on interactive controls or anything inside the play bar
         if (isinstance(obj, (QAbstractButton, QAbstractSlider)) or
                 obj.inherits("QAbstractButton") or
                 obj.inherits("QAbstractSlider") or
                 obj == self.videoWidget.playBar or
                 self.videoWidget.playBar.isAncestorOf(obj)):
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._toggle_fullscreen()
+                return True
+
+        if self.isFullScreen():
             return super().eventFilter(obj, event)
 
         if event.type() == QEvent.Type.MouseButtonPress:
@@ -73,11 +102,40 @@ class VideoPlayerDialog(QDialog):
 
         return super().eventFilter(obj, event)
 
+    def _toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            # set maximum height and width to screen size, fix with taskbar and top bar
+            self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint |
+                                Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint)
+            screen_size = self.screen().size()
+            self.setMaximumSize(screen_size.width(), screen_size.height())
+            self.showFullScreen()
+
     def _on_position_changed(self, position: int):
         pass
 
     def _on_media_status_changed(self, status):
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+        if status in [QMediaPlayer.MediaStatus.BufferedMedia, QMediaPlayer.MediaStatus.LoadedMedia]:
+            self.loadingLabel.hide()
+        elif status == QMediaPlayer.MediaStatus.StalledMedia:
+            self.loadingLabel.setText("Buffering...")
+            self.loadingLabel.show()
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self.loadingLabel.setText("Failed to Load Media")
+            self.loadingLabel.setStyleSheet(f"""
+                QLabel {{
+                    color: #FF5D5D;
+                    font-family: 'Segoe UI', -apple-system, sans-serif;
+                    font-size: 16px;
+                    font-weight: bold;
+                    background-color: rgba(0, 0, 0, 0.85);
+                    border-radius: 12px;
+                }}
+            """)
+            self.loadingLabel.show()
+        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.videoWidget.player.setPosition(0)
             self.videoWidget.player.pause()
 
@@ -103,6 +161,8 @@ class VideoPlayerDialog(QDialog):
         x = (dialog_w - w) // 2
         y = (dialog_h - h) // 2
         self.videoWidget.setGeometry(x, y, w, h)
+        if hasattr(self, 'loadingLabel') and self.loadingLabel:
+            self.loadingLabel.setGeometry(x, y, w, h)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -124,6 +184,19 @@ class VideoPlayerDialog(QDialog):
         if not file_path_or_url:
             self.setWindowTitle("No Media Loaded")
             return
+
+        self.loadingLabel.setText("Loading Media...")
+        self.loadingLabel.setStyleSheet(f"""
+            QLabel {{
+                color: #FFFFFF;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
+                font-size: 16px;
+                font-weight: bold;
+                background-color: rgba(0, 0, 0, 0.7);
+                border-radius: 12px;
+            }}
+        """)
+        self.loadingLabel.show()
 
         scheme = urlparse(file_path_or_url).scheme
         if 'http' in scheme:
