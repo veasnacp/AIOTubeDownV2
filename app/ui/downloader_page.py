@@ -244,6 +244,10 @@ class DownloaderPage(ScrollArea):
             self.toggle_detail_btn.setEnabled(False)
         else:
             self.toggle_detail_btn.setEnabled(True)
+
+        if self.loading_bar:
+            self._move_loading_bar(self.loading_bar)
+
         return super().resizeEvent(event)
 
     def update_theme(self):
@@ -391,6 +395,15 @@ class DownloaderPage(ScrollArea):
             self.loading_bar.setState(True)
             self.loading_bar = None
 
+    def _move_loading_bar(self, loading_bar: StateToolTip):
+        window_width = self.window().width()
+        window_height = self.window().height()
+        tooltip_width = loading_bar.width()
+        tooltip_height = loading_bar.height()
+        x = (window_width - tooltip_width) // 2
+        y = window_height - tooltip_height - 60
+        loading_bar.move(x, y)
+
     def _show_loading_bar(self, title: str, content: str):
         if self.loading_bar:
             return
@@ -400,14 +413,7 @@ class DownloaderPage(ScrollArea):
             content,
             self
         )
-        # move to bottom center
-        window_width = self.window().width()
-        window_height = self.window().height()
-        tooltip_width = self.loading_bar.width()
-        tooltip_height = self.loading_bar.height()
-        x = (window_width - tooltip_width) // 2
-        y = window_height - tooltip_height - 60
-        self.loading_bar.move(x, y)
+        self._move_loading_bar(self.loading_bar)
         self.loading_bar.show()
 
     def on_extract_progress(self, task_id, data):

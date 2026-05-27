@@ -28,6 +28,9 @@ class YouTubeExtractor(_YouTubeExtractor):
     def get_video_url_play(self, chapter: Dict[str, Any]):
         return chapter.get("sd", "")
 
+    def get_chapter_url(self, chapter: Dict[str, Any]):
+        return chapter.get("url", "")
+
     def get_next_options(self, chapter_list: List[Dict] | None = None, more="next"):
         options = {
             "limit": None,
@@ -148,6 +151,9 @@ class FacebookExtractor(_FacebookExtractor):
     def get_video_url_play(self, chapter: Dict[str, Any]):
         return chapter.get("sd", "")
 
+    def get_chapter_url(self, chapter: Dict[str, Any]):
+        return chapter.get("url", "")
+
     def get_next_options(self, chapter_list: List[Dict] | None = None, more="next"):
         options = {
             "limit": None,
@@ -238,6 +244,9 @@ class TikTokExtractor(_TikTokExtractor):
     def get_video_url_play(self, chapter: Dict[str, Any]):
         return chapter.get("sd", "")
 
+    def get_chapter_url(self, chapter: Dict[str, Any]):
+        return chapter.get("url", "")
+
     def get_next_options(self, chapter_list: List[Dict] | None = None, more="next"):
         options = {
             "limit": None,
@@ -319,6 +328,9 @@ class KuaishouExtractor(_KuaishouExtractor):
 
     def get_video_url_play(self, chapter: Dict[str, Any]):
         return chapter.get("sd", "")
+
+    def get_chapter_url(self, chapter: Dict[str, Any]):
+        return chapter.get("url", "")
 
     def _set_cookie_testing(self):
         raw_cookies = None

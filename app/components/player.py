@@ -1,5 +1,6 @@
 
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlparse
 
 from PySide6.QtCore import QEvent, Qt, QUrl
@@ -19,6 +20,9 @@ class VideoPlayerDialog(QDialog):
                             Qt.WindowType.WindowTitleHint |
                             Qt.WindowType.WindowCloseButtonHint)
         self.setWindowModality(Qt.WindowModality.WindowModal)
+
+        self.is_video_url = False
+
         self.videoWidget = VideoWidget(self)
         self.videoWidget.player.positionChanged.connect(
             self._on_position_changed)
@@ -123,7 +127,13 @@ class VideoPlayerDialog(QDialog):
             self.loadingLabel.setText("Buffering...")
             self.loadingLabel.show()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
-            self.loadingLabel.setText("Failed to Load Media")
+            if self.is_video_url:
+                self.loadingLabel.setText(
+                    "Failed to Load Media.\n"
+                    "Please download this video first!"
+                )
+            else:
+                self.loadingLabel.setText("Failed to Load Media")
             self.loadingLabel.setStyleSheet(f"""
                 QLabel {{
                     color: #FF5D5D;
@@ -180,7 +190,8 @@ class VideoPlayerDialog(QDialog):
         self.resize(800, 450)
         self._update_video_geometry()
 
-    def setVideo(self, file_path_or_url: str):
+    # dialog_title use only for video url from network.
+    def setVideo(self, file_path_or_url: str, dialog_title: Optional[str] = None):
         if not file_path_or_url:
             self.setWindowTitle("No Media Loaded")
             return
@@ -200,8 +211,9 @@ class VideoPlayerDialog(QDialog):
 
         scheme = urlparse(file_path_or_url).scheme
         if 'http' in scheme:
+            self.is_video_url = True
             basename = urlparse(file_path_or_url).path.split("/")[-1]
-            self.setWindowTitle(basename)
+            self.setWindowTitle(f"{dialog_title or basename}")
             self.videoWidget.setVideo(QUrl(file_path_or_url))
         else:
             basename = Path(file_path_or_url).name

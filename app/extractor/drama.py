@@ -28,7 +28,7 @@ class DramaBoxExtractor(DramaExtractorBase):
     _BASE_URL = "https://www.dramaboxdb.com"
     _LINK_ID = "https://www.dramaboxdb.com/movie/%s"
     _LINK_EP = "https://www.dramaboxdb.com/ep/%s"
-    _PROXY_VIDEO_URL = "https://nahhhngapainlohhh.dramabos.asia/proxy?url=%s"
+    _PROXY_VIDEO_URL = "https://dramabox.dramabos.online/proxy?url=%s"
     _BUILD_ID = "dramaboxdb_prod_20260423"
     _LINK_GET_BUILD_ID = f"{_BASE_URL}/downloadapp"
     _CLOUD_FOLDER = "drama/dramabox"
@@ -68,6 +68,10 @@ class DramaBoxExtractor(DramaExtractorBase):
             url = self._LINK_ID % video_id
         return url, video_id
 
+    def get_drama_id(self, url: str):
+        _, drama_id = self.get_drama_id_slug_title(url)
+        return drama_id
+
     def get_video_ts(self, cover: str, ep: int, resolution: str = "720p"):
         pre_ts = cover.split('.mp4.')[0].replace(
             'thwztvideo', 'hwzthls', 1).split('/')
@@ -95,6 +99,9 @@ class DramaBoxExtractor(DramaExtractorBase):
         if bool(chapter.get('m3u8Url')):
             return chapter['m3u8Url']
         return self.get_video_resolution(chapter['cover'])[resolution]
+
+    def get_chapter_id(self, chapter: dict) -> str:
+        return chapter.get('chapter_id') or ''
 
     async def get_drama_info(self, url: str):
         url, drama_id_with_title_slug = self.get_drama_id_slug_title(url)
@@ -305,6 +312,10 @@ class ReelShortExtractor(DramaExtractorBase):
             url = self._LINK_ID % slug_title
 
         return url, slug_title
+
+    def get_drama_id(self, url: str):
+        _, drama_id = self.get_drama_id_slug_title(url)
+        return drama_id
 
     def get_video_url_play(self, chapter: dict):
         return chapter.get('video_url') or ''

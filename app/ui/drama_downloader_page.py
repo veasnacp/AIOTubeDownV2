@@ -262,8 +262,8 @@ class ScrapeWorker(QRunnable):
 
             self.extractor.set_test_mode(True)
             # info = await self.extractor.test_get_drama_info(self.url)
-            # info = self.extractor.load_test_data('_drama')
-            info = self._info.copy() if isinstance(self._info, dict) else None
+            info = self.extractor.load_test_data('_drama')
+            # info = self._info.copy() if isinstance(self._info, dict) else None
             if not info:
                 if hasattr(self.extractor, 'get_profile_info'):
                     limit = self.options["limit"]
@@ -791,10 +791,11 @@ class DramaSidebar(ScrollArea):
         self.download_workers.clear()
 
     def show_play_btn(self):
-        if hasattr(self.extractor, '_EXTENDS_NAME'):
-            self.play_btn_container.show()
-        else:
-            self.play_btn_container.hide()
+        self.play_btn_container.show()
+        # if hasattr(self.extractor, '_EXTENDS_NAME'):
+        #     self.play_btn_container.show()
+        # else:
+        #     self.play_btn_container.hide()
 
     def open_directory(self):
         if not self.current_selected_chapter:
@@ -826,10 +827,16 @@ class DramaSidebar(ScrollArea):
         if not self.current_selected_chapter:
             return
         chapter = self.current_selected_chapter.copy()
-        if chapter.get('sd') and chapter.get('hd'):
-            return
+        if hasattr(self.extractor, '_EXTENDS_NAME'):
+            if chapter.get('sd') and chapter.get('hd'):
+                return
+            url = chapter.get('url')
+        else:
+            video_id = chapter.get(
+                'chapter_id') or self.extractor.get_chapter_id(chapter)
+            # use video_id as url for drama site
+            url = video_id
 
-        url = chapter.get('url')
         if not url:
             self.logger.warning("[!] ⚠️ Video URL not found")
             return
@@ -842,8 +849,14 @@ class DramaSidebar(ScrollArea):
         if hasattr(self.extractor, 'update_episodes_selected') \
                 and callable(self.extractor.update_episodes_selected):
             self.update_info_workers.add(update_worker)  # Register worker
+
+            def _on_update_info_finished(info, info_key, extractor, worker=None, download=False):
+                self._on_update_info_finished(
+                    info, info_key, extractor, worker, download)
+                self.check_video_btn.hide()
+
             update_worker.signals.finished.connect(
-                lambda i, k, w=update_worker: self._on_update_info_finished(i, k, self.extractor, w, download=False))
+                lambda i, k, w=update_worker: _on_update_info_finished(i, k, self.extractor, w, download=False))
             update_worker.signals.error.connect(
                 lambda e, w=update_worker: self._on_update_info_error(e, w))
             QThreadPool.globalInstance().start(update_worker)
@@ -856,6 +869,19 @@ class DramaSidebar(ScrollArea):
 
         video_url = self.extractor.get_video_url_play(
             self.current_selected_chapter)
+
+        dialog_title = self.current_selected_chapter.get('title')
+        if not dialog_title and hasattr(self.extractor, 'get_chapter_id'):
+            video_id = self.extractor.get_chapter_id(
+                self.current_selected_chapter)
+            if video_id:
+                dialog_title = video_id
+
+        output_file = self.current_selected_chapter.get('output_file')
+        if output_file:
+            path = Path(output_file)
+            video_url = output_file if path.exists() else video_url
+
         if not video_url:
             self.check_video_btn.show()
             self.logger.warning("[!] ⚠️ Video URL not found")
@@ -863,6 +889,7 @@ class DramaSidebar(ScrollArea):
         if not self.check_video_btn.isHidden():
             self.check_video_btn.hide()
 
+        self.logger.debug(f'chapter: {self.current_selected_chapter}')
         if 'width' in self.current_selected_chapter and 'height' in self.current_selected_chapter:
             width = self.current_selected_chapter['width']
             height = self.current_selected_chapter['height']
@@ -872,7 +899,7 @@ class DramaSidebar(ScrollArea):
                 dialog.resizeLandscape()
         else:
             dialog.resizePortrait()
-        dialog.setVideo(video_url)
+        dialog.setVideo(video_url, dialog_title)
         dialog.play()
         dialog.show()
 
@@ -908,11 +935,17 @@ class DramaSidebar(ScrollArea):
             if has_episodes_selected_func and len(selected_chapters) == len(self.info.get('chapterList', [])):
                 update_worker.url_episodes_selected = None
             else:
-                update_worker.url_episodes_selected = [
-                    chapter.get(
-                        'chapter_id') or self.extractor.get_chapter_id(chapter)
-                    for chapter in selected_chapters
-                ]
+                if hasattr(self.extractor, '_EXTENDS_NAME'):
+                    update_worker.url_episodes_selected = [
+                        self.extractor.get_chapter_url(chapter)
+                        for chapter in selected_chapters
+                    ]
+                else:
+                    update_worker.url_episodes_selected = [
+                        chapter.get(
+                            'chapter_id') or self.extractor.get_chapter_id(chapter)
+                        for chapter in selected_chapters
+                    ]
 
             self.update_info_workers.add(update_worker)  # Register worker
 
@@ -1072,8 +1105,9 @@ class DramaSidebar(ScrollArea):
 class DramaDownloader(QWidget):
     """Main Drama Downloader Interface"""
 
-    def __init__(self, parent=None, object_name="all_drama_downloader"):
+    def __init__(self, parent: 'DramaDownloaderPage', object_name="all_drama_downloader"):
         super().__init__(parent)
+        self.main_page = parent
         self.setObjectName(object_name)
         self.info_key = None
 
@@ -1274,6 +1308,11 @@ class DramaDownloader(QWidget):
         self.cleanup()
         super().closeEvent(event)
 
+    def resizeEvent(self, event):
+        if self.loading_bar:
+            self._move_loading_bar(self.loading_bar)
+        return super().resizeEvent(event)
+
     def scroll_to_bottom(self, msg: str):
         try:
             self.log_output.append(msg.strip())
@@ -1392,28 +1431,31 @@ class DramaDownloader(QWidget):
             return
 
         info = self.sidebar.info
-        if not hasattr(self.sidebar.extractor, '_EXTENDS_NAME'):
-            if selected > 0:
-                for i, btn in enumerate(self.ep_buttons):
-                    if btn.isChecked():
-                        if i < len(info.get('chapterList', [])):
-                            self.sidebar.current_selected_chapter = info['chapterList'][i]
-                        break
-            else:
-                self.sidebar.current_selected_chapter = None
-            return
+        # if not hasattr(self.sidebar.extractor, '_EXTENDS_NAME'):
+        #     if selected > 0:
+        #         for i, btn in enumerate(self.ep_buttons):
+        #             if btn.isChecked():
+        #                 if i < len(info.get('chapterList', [])):
+        #                     self.sidebar.current_selected_chapter = info['chapterList'][i]
+        #                 break
+        #     else:
+        #         self.sidebar.current_selected_chapter = None
+        #     return
 
         if selected > 0:
             self.sidebar.show_play_btn()
             for i, btn in enumerate(self.ep_buttons):
                 if btn.isChecked():
                     if i < len(info.get('chapterList', [])):
-                        self.sidebar.title.setText(
-                            f"{info['chapterList'][i].get('title')}")
+                        title = info['chapterList'][i].get('title')
+                        if title:
+                            self.sidebar.title.setText(title)
                         self.sidebar.current_selected_chapter = info['chapterList'][i]
                     break
-            self.sidebar.poster.loadImage(
-                self.sidebar.current_selected_chapter.get('thumbnail', ''))
+            thumbnail = self.sidebar.current_selected_chapter.get(
+                'thumbnail') or ''
+            if thumbnail and thumbnail.startswith("http"):
+                self.sidebar.poster.loadImage(thumbnail)
         else:
             self.sidebar.play_btn_container.hide()
             self.sidebar.current_selected_chapter = None
@@ -1533,11 +1575,11 @@ class DramaDownloader(QWidget):
 
         self.sidebar.extractor = extractor
 
+        self._show_loading_bar(
+            f"Scraping data from ID: {drama_id}", 'Please wait...')
         if info and not self.view_more_episode:
             self._on_scrape_finished(info, info_key, extractor)
         else:
-            self._show_loading_bar(
-                f"Scraping data from {urlparse(url).path.split('/')[-1]}", 'Please wait...')
 
             worker = ScrapeWorker(extractor, url, info_key,
                                   tab_id=self.objectName())
@@ -1578,6 +1620,15 @@ class DramaDownloader(QWidget):
                 new_count = len(info["chapterList"])
                 self.append_new_episodes(old_count + 1, new_count)
 
+    def _move_loading_bar(self, loading_bar: StateToolTip):
+        window_width = self.window().width()
+        window_height = self.window().height()
+        tooltip_width = loading_bar.width()
+        tooltip_height = loading_bar.height()
+        x = (window_width - tooltip_width) // 2 - 60
+        y = window_height - tooltip_height - 60
+        loading_bar.move(x, y)
+
     def _show_loading_bar(self, title: str, content: str):
         if self.loading_bar:
             return
@@ -1585,16 +1636,9 @@ class DramaDownloader(QWidget):
         self.loading_bar = StateToolTip(
             title,
             content,
-            self
+            self.main_page
         )
-        # move to bottom center
-        window_width = self.window().width()
-        window_height = self.window().height()
-        tooltip_width = self.loading_bar.width()
-        tooltip_height = self.loading_bar.height()
-        x = (window_width - tooltip_width) // 2
-        y = window_height - tooltip_height - 30
-        self.loading_bar.move(x, y)
+        self._move_loading_bar(self.loading_bar)
         self.loading_bar.show()
 
     def _close_loading_bar(self):
