@@ -687,15 +687,15 @@ class DramaBiteExtractor(DramaExtractorBase):
         total_episode = info.get('total_episode') or info.get('update_episode')
         if not total_episode:
             return info
-        episode_list = info['chapterList']
-        chunk_size = 6
-        chunks: List[List[Dict[str, Any]]] = [
-            episode_list[i: i + chunk_size]
-            for i in range(0, len(episode_list), chunk_size)
-        ]
+        # episode_list = info['chapterList']
+        # chunk_size = 6
+        # chunks: List[List[Dict[str, Any]]] = [
+        #     episode_list[i: i + chunk_size]
+        #     for i in range(0, len(episode_list), chunk_size)
+        # ]
         tasks: List[asyncio.Task] = []
         count = 0
-        for chunk in chunks:
+        for chunk in arr_chunk(info['chapterList'], chunk_size):
             if not chapter_id_list or len(chapter_id_list) <= count:
                 break
             async with asyncio.TaskGroup() as tg:
@@ -709,7 +709,7 @@ class DramaBiteExtractor(DramaExtractorBase):
                             f"[!] 🔍 Fetching video info for episode: {episode_id}")
                     count += 1
                     tasks.append(tg.create_task(
-                        self._get_chapter_info(drama_id, episode_id)))
+                        self._get_chapter_info(drama_id, episode_id - 1 if episode_id > 10 else episode_id)))
 
         result_count = 0
         for task in tasks:
@@ -730,10 +730,14 @@ class DramaBiteExtractor(DramaExtractorBase):
                 if result.get('link_info'):
                     episode_id = result['link_info']['vid']
                     index = next((i for i, item in enumerate(
-                        episode_list) if item["vid"] == episode_id), None)
+                        info['chapterList']) if item["vid"] == episode_id), None)
                     if index is not None:
                         result_count += 1
-                        episode_list[index].update(result['link_info'])
+                        info['chapterList'][index].update(result)
+                        if 'preload_episode_links' in info['chapterList'][index]:
+                            del info['chapterList'][index]['preload_episode_links']
+                        self.logger.debug(
+                            f"[!] ✅ Found video info for episode {episode_id}")
 
                     preload_episode_links = result.get(
                         'preload_episode_links', [])
@@ -741,9 +745,9 @@ class DramaBiteExtractor(DramaExtractorBase):
                         try:
                             ep_id = episode_link.get("vid")
                             index = next((i for i, item in enumerate(
-                                episode_list) if item["vid"] == ep_id), None)
+                                info['chapterList']) if item["vid"] == ep_id), None)
                             if index is not None:
-                                episode_list[index]['link_info'] = episode_link
+                                info['chapterList'][index]['link_info'] = episode_link
 
                         except Exception as e:
                             self.logger.error(
@@ -755,7 +759,6 @@ class DramaBiteExtractor(DramaExtractorBase):
 
         if result_count > 0:
             self.logger.info(f"[!] ✅ Found {result_count} episodes")
-        info['chapterList'] = episode_list
         self._cache[drama_id] = info
         return info
 

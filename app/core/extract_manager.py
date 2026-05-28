@@ -258,10 +258,10 @@ class ExtractWorker(DefaultWorker):
                             'status': 'start',
                             'extractor': f"{extractor_name}".upper(),
                         })
-                    # if hasattr(scout, "get_video_info_list_yt_dlp"):
-                    #     info_list = await scout.get_video_info_list_yt_dlp(url_list)
-                    # else:
-                    info_list = await scout.get_video_info_list(url_list)
+                    if hasattr(scout, "get_video_info_list_yt_dlp"):
+                        info_list = await scout.get_video_info_list_yt_dlp(url_list)
+                    else:
+                        info_list = await scout.get_video_info_list(url_list)
 
                     if info_list:
                         scout.save_test_data(info_list)

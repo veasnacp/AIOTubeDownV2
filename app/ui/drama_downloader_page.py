@@ -66,6 +66,7 @@ from ..components.override import TextInput as LineEdit
 from ..components.override import TransparentDropDownToolButton, TransparentToolButton
 from ..components.player import VideoPlayerDialog
 from ..core._worker import DefaultWorker
+from ..core.download_manager import DownloadManager
 from ..extractor._utils import safe_filename
 from ..extractor.drama import (
     DramaBiteExtractor,
@@ -86,6 +87,9 @@ from ..extractor.extends_drama import (
 from ..theme import Colors, DarkMode, LightMode
 from ..utils.path import reveal_file
 from ..utils.validation import is_valid_url
+
+dl_manager = DownloadManager()
+dl_manager.is_enable_db = False
 
 
 class PrimaryPushButton(_PrimaryPushButton):
@@ -757,6 +761,13 @@ class DramaSidebar(ScrollArea):
         self.download_btn.clicked.connect(self.download_selected)
         self.cancel_btn.clicked.connect(self.cancel_all)
 
+        dl_manager.task_progress.connect(lambda task_id, downloaded, total, speed, eta: self.on_download_progress(
+            {'task_id': task_id, 'downloaded': downloaded, 'total': total, 'speed': speed, 'eta': eta}))
+        dl_manager.task_finished.connect(lambda task_id, filepath: self.on_download_finished({
+                                         'task_id': task_id, 'filepath': filepath}))
+        dl_manager.task_error.connect(lambda task_id, error_msg: self.on_download_error(
+            {'task_id': task_id, 'error_msg': error_msg}))
+
     def cleanup(self):
         # Cleanup poster task
         if hasattr(self, 'poster') and self.poster:
@@ -805,8 +816,10 @@ class DramaSidebar(ScrollArea):
         if output_file:
             path = Path(output_file)
         else:
-            path = Path(self.path_edit.text()) / \
-                safe_filename(self.title.text())
+            title_safe = safe_filename(self.title.text())
+            if hasattr(self.extractor, '_EXTENDS_NAME'):
+                title_safe = self.extractor._EXTENDS_NAME
+            path = Path(self.path_edit.text()) / title_safe
 
         if path and path.exists():
             if output_file:
@@ -1001,6 +1014,41 @@ class DramaSidebar(ScrollArea):
         self.logger.info(
             f"Downloading {len(selected_chapters)} selected episodes...")
 
+        self.logger.info(f"output dir: {self.output_dir}")
+        if hasattr(self.extractor, '_EXTENDS_NAME'):
+            title_list = []
+            for info in selected_chapters:
+                options = {
+                    "category": "Drama",
+                    "resolution": "720",
+                    "mp3": False,
+                    "thumbnail": False,
+                    "with_site": True,
+                    "with_username": True
+                }
+                title = info.get('title') or ''
+                title_list.append(title.lower())
+                if 'extractor' in info and info['extractor']:
+                    extractor_key = info['extractor']
+                    uploader = info.get('uploader')
+                    parent_folder = Path(self.output_dir) / \
+                        extractor_key / uploader
+                    if len(selected_chapters) > 1:
+                        if title.lower() in title_list and info.get('id'):
+                            info['title'] = f"{title} [{info['id']}]"
+                    else:
+                        filepath = parent_folder / f"{title}.mp4"
+                        if filepath.exists() and info.get('id'):
+                            info['title'] = f"{title} [{info['id']}]"
+
+                    info['output_file'] = str(
+                        parent_folder / f"{info['title']}.mp4")
+
+                dl_manager.add_task('', '', self.output_dir,
+                                    info=info, options=options)
+
+            return
+
         worker = DramaDownloadWorker(
             self.extractor,
             download_info,
@@ -1024,6 +1072,13 @@ class DramaSidebar(ScrollArea):
         if not downloader or not isinstance(downloader, DramaDownloader):
             return
 
+        if hasattr(self.extractor, '_EXTENDS_NAME'):
+            percentage = d['downloaded'] / d['total'] * 100
+            downloader.progress_bar.setValue(int(percentage))
+            downloader.progress_bar.setFormat(
+                f"{d['downloaded']}/{d['total']} ({int(percentage)}%) - {d['speed']}")
+            return
+
         downloader.progress_bar.setValue(int(d['percentage']))
         downloader.progress_bar.setFormat(
             f"{d['downloaded']}/{d['total']} ({d['percentage']}%) - {d['speed']}")
@@ -1032,6 +1087,14 @@ class DramaSidebar(ScrollArea):
         """
         Callback for successful download completion
         """
+
+        if hasattr(self.extractor, '_EXTENDS_NAME'):
+            if 'filepath' in data:
+                self.logger.info(f"✅ Download finished: {data['filepath']}")
+            if 'task_id' in data:
+                dl_manager.remove_task(data['task_id'])
+            return
+
         self.logger.info(
             f"✅ Download finished: {len(data['success'])} success, {len(data['failed'])} failed")
         if 'info' in data and isinstance(data['info'], dict):
@@ -1048,7 +1111,15 @@ class DramaSidebar(ScrollArea):
         """
         Callback for download errors
         """
-        self.logger.error(f"Download error: {error_info}")
+        if hasattr(self.extractor, '_EXTENDS_NAME'):
+            if 'task_id' in error_info:
+                dl_manager.remove_task(error_info['task_id'])
+            if 'error_msg' in error_info:
+                self.logger.error(
+                    f"❌ Download error: {error_info['error_msg']}")
+            return
+
+        self.logger.error(f"❌ Download error: {error_info}")
         if worker and worker in self.download_workers:
             self.download_workers.remove(worker)
 
