@@ -1,0 +1,25 @@
+[project]
+name = "aiotubedown"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiofiles>=25.1.0",
+    "cloudinary>=1.44.2",
+    "colorthief>=0.2.1",
+    "curl-cffi>=0.15.0",
+    "darkdetect>=0.8.0",
+    "dill>=0.4.1",
+    "humanize>=4.15.0",
+    "loguru>=0.7.3",
+    "pillow>=12.2.0",
+    "platformdirs>=4.9.6",
+    "pycryptodome>=3.23.0",
+    "pyside6==6.9.3",
+    "pytubefix>=10.7.2",
+    "pywin32>=311",
+    "scipy>=1.17.1",
+    "tqdm>=4.67.3",
+    "yt-dlp>=2026.3.17",
+]

@@ -591,9 +591,10 @@ class DramaBiteExtractor(DramaExtractorBase):
     def get_episode_cover_url(self, entry):
         return self.get_cover_url(entry)
 
-    def get_video_url_play(self, entry: dict):
-        path = entry.get('video_link') or entry.get(
-            'video_link_m3u8') or entry.get('multi_rate_m3u8')
+    def get_video_url_play(self, chapter: dict):
+        link_info = chapter.get('link_info') or chapter
+        path = link_info.get('video_link') or link_info.get(
+            'video_link_m3u8') or link_info.get('multi_rate_m3u8')
         if path:
             return self._get_abs_video(path)
         return None
@@ -674,7 +675,14 @@ class DramaBiteExtractor(DramaExtractorBase):
                 info = await get_info(info)
         return info
 
-    async def update_all_episodes(self, info: dict):
+    async def update_all_episodes(self, info, chunk_size=10):
+        chapter_id_list = [
+            chapter_info['vid'] for chapter_info in info['chapterList']
+            if not self.get_video_url_play(chapter_info) and 'vid' in chapter_info
+        ]
+        return await self.update_episodes_selected(chapter_id_list, info, chunk_size)
+
+    async def update_episodes_selected(self, chapter_id_list: List[str], info, chunk_size=10):
         drama_id = info['book_id']
         total_episode = info.get('total_episode') or info.get('update_episode')
         if not total_episode:
@@ -686,13 +694,20 @@ class DramaBiteExtractor(DramaExtractorBase):
             for i in range(0, len(episode_list), chunk_size)
         ]
         tasks: List[asyncio.Task] = []
+        count = 0
         for chunk in chunks:
+            if not chapter_id_list or len(chapter_id_list) <= count:
+                break
             async with asyncio.TaskGroup() as tg:
                 for chapter_info in chunk:
                     episode_id = chapter_info['vid']
+                    video_url = self.get_video_url_play(chapter_info)
+                    if episode_id not in chapter_id_list or video_url:
+                        continue
                     if self._IS_TESTING:
                         self.logger.debug(
                             f"[!] 🔍 Fetching video info for episode: {episode_id}")
+                    count += 1
                     tasks.append(tg.create_task(
                         self._get_chapter_info(drama_id, episode_id)))
 
@@ -796,7 +811,7 @@ class DramaBiteExtractor(DramaExtractorBase):
         downloader = AsyncTSVideoDownloader(max_concurrent=5)
 
         def custom_temp_segments_dir_name(chapter):
-            m3u8_url = self.get_video_url_play(chapter["link_info"])
+            m3u8_url = self.get_video_url_play(chapter)
             if not m3u8_url:
                 return None
             match = re.search(r'/([^/]+)/([^/]+)\.m3u8', m3u8_url)
@@ -807,7 +822,7 @@ class DramaBiteExtractor(DramaExtractorBase):
             downloader,
             info,
             keys_chaper_info={
-                "video_url": lambda chapter: self.get_video_url_play(chapter["link_info"]),
+                "video_url": lambda chapter: self.get_video_url_play(chapter),
                 "temp_segments_dir_name": "vid",
                 "episode_number": "vid",
                 "custom_temp_segments_dir_name": custom_temp_segments_dir_name
@@ -831,7 +846,7 @@ class DramaBiteExtractor(DramaExtractorBase):
             for episode in info['chapterList']:
                 link_info = episode.get('link_info')
                 if link_info:
-                    episode['video_url'] = self.get_video_url_play(link_info)
+                    episode['video_url'] = self.get_video_url_play(episode)
                     episode['cover_url'] = self.get_episode_cover_url(
                         link_info)
                 # else:
