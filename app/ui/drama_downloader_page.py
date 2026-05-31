@@ -266,8 +266,8 @@ class ScrapeWorker(QRunnable):
 
             self.extractor.set_test_mode(True)
             # info = await self.extractor.test_get_drama_info(self.url)
-            info = self.extractor.load_test_data('_drama')
-            # info = self._info.copy() if isinstance(self._info, dict) else None
+            # info = self.extractor.load_test_data('_drama')
+            info = self._info.copy() if isinstance(self._info, dict) else None
             if not info:
                 if hasattr(self.extractor, 'get_profile_info'):
                     limit = self.options["limit"]

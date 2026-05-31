@@ -26,6 +26,7 @@ current_dir = Path(__file__).parent
 
 class DramaBoxExtractor(DramaExtractorBase):
     _BASE_URL = "https://www.dramaboxdb.com"
+    _BASE_URL_ALT = "https://www.dramabox.com"
     _LINK_ID = "https://www.dramaboxdb.com/movie/%s"
     _LINK_EP = "https://www.dramaboxdb.com/ep/%s"
     _PROXY_VIDEO_URL = "https://dramabox.dramabos.online/proxy?url=%s"
@@ -107,7 +108,11 @@ class DramaBoxExtractor(DramaExtractorBase):
         url, drama_id_with_title_slug = self.get_drama_id_slug_title(url)
         drama_id = drama_id_with_title_slug.split('/')[0]
 
+        # before
         json_url = f"{self._BASE_URL}/_next/data/{self._BUILD_ID}/en/movie/{drama_id_with_title_slug}.json"
+
+        # after
+        # json_url = f"{self._BASE_URL_ALT}/_next/data/{self._BUILD_ID.replace('boxdb', 'box')}/en/drama/{drama_id_with_title_slug}.json"
         if self._IS_TESTING:
             self.logger.debug(f"[!] 🔍 Fetching video info from: {json_url}")
         response = await self.request(

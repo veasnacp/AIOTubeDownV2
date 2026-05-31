@@ -739,6 +739,7 @@ class AsyncTSVideoDownloader(AsyncBaseRequest):
                 return False
 
             self.logger.info(f"✅ Found {len(segments)} TS segments")
+            self.logger.debug(f"Video TS: {segments[0]}")
 
             if self.custom_temp_segments_dir_name:
                 self.temp_segments_dir = self.temp_dir.joinpath(
