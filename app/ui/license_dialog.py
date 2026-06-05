@@ -2,20 +2,24 @@ import random
 import sys
 import hashlib
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication
+from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication
 from PySide6Addons import (MessageBoxBase, SubtitleLabel, LineEdit, PushButton,
                            PrimaryPushButton, FluentIcon, InfoBar, CaptionLabel,
                            BodyLabel)
 
 from ..core.license_manager import license_manager
 from ..components.override import TransparentToolButton
+from ..components.qt import LcBase
 
 
-class LicenseDialog(MessageBoxBase):
+class LicenseDialog(LcBase, MessageBoxBase):
     """Custom Dialog for License Activation"""
 
     def __init__(self, parent=None):
+        LcBase.__init__(self)
         super().__init__(parent)
+
+        self.init_dll()
 
         # Title bar
         self.title_layout = QHBoxLayout()
@@ -33,7 +37,7 @@ class LicenseDialog(MessageBoxBase):
         self.hw_label = CaptionLabel(
             "Your Hardware ID (Unique to this PC):", self)
         self.hw_id_edit = LineEdit(self)
-        self.hw_id_edit.setText(license_manager.hw_id)
+        # self.hw_id_edit.setText(license_manager.hw_id)
         self.hw_id_edit.setReadOnly(True)
 
         self.copy_btn = PushButton(FluentIcon.COPY, "Copy ID", self)
@@ -97,10 +101,27 @@ class LicenseDialog(MessageBoxBase):
 
         self.widget.setMinimumWidth(450)
 
+        self._load_hwid()
+        self._load_backend_url()
+
     def _copy_hw_id(self):
         QApplication.clipboard().setText(license_manager.hw_id)
         InfoBar.success("Copied", "Hardware ID copied to clipboard",
                         duration=1500, parent=self)
+
+    def _on_hwid_result(self, code: int, hwid: str):
+        if code == 0:
+            self.hw_id_edit.setText(f"{hwid}".upper())
+        else:
+            QMessageBox.warning(
+                self, "Warning", "⚠️ Unable to retrieve HWID. License activation may fail.")
+
+    def _on_backend_url_result(self, code: int, url: str):
+        if code == 0 and url:
+            self._backend_url = url
+            self.check_existing_activation()
+        else:
+            self.close()
 
     def _on_activate_clicked(self):
         key = self.key_edit.text().strip()

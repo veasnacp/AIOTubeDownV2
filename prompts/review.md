@@ -108,3 +108,90 @@ This code review focuses on the `app/ui/drama_downloader_page.py` module, evalua
 - **Thread Signal Cleanup**:
   - **Observation**: When a user closes or changes tabs while a scrape/download is running, the background threads keep executing. Once finished, their signals will fire callbacks on the destroyed sidebar widgets, throwing Python errors.
   - **Best Practice**: Track all running workers and disconnect their signals cleanly on widget destruction.
+
+---
+
+## 🔍 Main Window Code Review (June 5, 2026)
+
+This code review focuses on the `app/ui/main_window.py` module, evaluating its architecture, license management flow, thread safety, and UI design best practices.
+
+### 1. 🐛 Critical Bugs & Structural Defects
+- **License System Bypass & Incomplete Implementation**:
+  - **Issue**:
+    1. `show_license_dialog` is defined in `MainWindow` but never called or initialized.
+    2. In `show_license_dialog`, if a user cancels the activation, the app logs a message but only calls `dialog.close()`, failing to exit the application.
+    3. In `LicenseDialog.closeEvent` (`app/ui/license_dialog.py`), the call to `QApplication.quit()` is commented out.
+  - **Impact**: The licensing system is completely non-functional and easily bypassed. Even if the dialog were shown, canceling it does not close the application, allowing unrestricted access.
+  - **Best Practice**:
+    - Trigger `self.show_license_dialog()` during initialization (e.g. at the end of `__init__` or using `QTimer.singleShot(0, self.show_license_dialog)`).
+    - Call `sys.exit()` or `QApplication.quit()` when the license check is rejected.
+
+- **Non-Functional Global Keyboard Shortcuts**:
+  - **Issue**: Shortcuts `Ctrl+N` and `Ctrl+F4` are assigned to actions added to `self.tasks_menu` (a popup/context menu).
+  - **Impact**: In Qt, actions inside context/popup menus only trigger shortcuts when the menu itself is active and has focus. If the menu is closed, pressing `Ctrl+N` does nothing.
+  - **Best Practice**: Add the actions directly to the main window container:
+    ```python
+    self.addAction(self.new_file_action)
+    ```
+
+- **Unlinked Menu Actions (Dead UX)**:
+  - **Issue**: The `About` menu action in the `help_menu` is created but has no connected slot/callback:
+    `help_menu.addAction(Action(self.tr("About")))`
+  - **Impact**: Users clicking "About" will experience a dead button with no response.
+  - **Best Practice**: Connect it to a slot that shows a dialog:
+    ```python
+    help_menu.addAction(Action(self.tr("About"), triggered=self.show_about_dialog))
+    ```
+
+- **Platform-Specific Crash Risk**:
+  - **Issue**: `sys.getwindowsversion()` is used directly to evaluate `self.isWin11`.
+  - **Impact**: While short-circuiting on `sys.platform != 'win32'` protects it, direct calls to platform-specific APIs are fragile. If run on macOS/Linux, it risks throwing an `AttributeError`.
+  - **Best Practice**: Safely guard the platform-specific call:
+    ```python
+    self.isWin11 = False
+    if sys.platform == 'win32':
+        self.isWin11 = sys.getwindowsversion().build >= 22000
+    ```
+
+### 2. ⚡ Memory Safety & Threading Stability
+- **Abrupt Thread Termination on Exit**:
+  - **Issue**: In `closeEvent`, the main event loop is killed immediately via `QApplication.quit()` after calling stop/cancellation commands.
+  - **Impact**: Since `DownloadManager`, `ExtractManager`, and `ThumbnailManager` run workers in thread pools, background threads will still be active. Terminating the application abruptly while background threads are reading/writing files or writing to the SQLite database can lead to data corruption, file locks, or segmentation faults on exit.
+  - **Best Practice**: Wait for the thread pools to clean up gracefully before quitting:
+    ```python
+    def closeEvent(self, event):
+        logger.debug("Application closing, stopping all managers...")
+        try:
+            manager.stop_all()
+            extract_manager.stop_all_extraction()
+            thumbnail_manager.stop_all()
+            
+            # Wait for thread pools to finish active tasks (with a timeout)
+            manager.thread_pool.waitForDone(1000)
+            extract_manager.thread_pool.waitForDone(1000)
+        except Exception as e:
+            logger.debug(f"Error during shutdown cleanup: {e}")
+        event.accept()
+    ```
+
+- **Unused and Dangerous Thread Implementation**:
+  - **Issue**: `LicenseThread` inherits from `QThread` solely to emit a signal back to the main thread to show a dialog.
+  - **Impact**: It is unused dead code. Furthermore, spawning a heavy OS thread to delay/show a UI dialog is an anti-pattern. Qt widgets must only be created and manipulated on the main GUI thread.
+  - **Best Practice**: Remove `LicenseThread`. If you need to defer UI checks on startup, use a single-shot timer:
+    ```python
+    QTimer.singleShot(0, self.show_license_dialog)
+    ```
+
+- **Synchronous File I/O on the GUI Thread**:
+  - **Issue**: `_import_urls_from_file` and `_open_recent_file` read text files synchronously using `file.readAll()`.
+  - **Impact**: If a user loads a text file with a large quantity of URLs or deep metadata, it will block the GUI thread and cause the application window to freeze or display a "Not Responding" status.
+  - **Best Practice**: Load file content asynchronously or offload parsing to a background thread if the file exceeds a certain threshold.
+
+### 3. 🎨 UI/UX Polish & Modern Architecture
+- **Brittle Event Overriding in Custom Button**:
+  - **Issue**: `PushButtonHover` overrides `mousePressEvent` and `mouseReleaseEvent` to invoke arbitrary callbacks `self.onPress` and `self.onRelease` and set `self.setChecked(False)`.
+  - **Impact**: Overriding `mouseReleaseEvent` to set unchecked breaks standard button toggle behavior. Rebinding methods dynamically (`self.tasks_btn.onPress = ...`) is a non-pythonic anti-pattern that makes debugging and maintaining the code extremely difficult.
+  - **Best Practice**: Cleanly connect to Qt's standard signals (`pressed()`, `released()`, `clicked()`) rather than replacing methods:
+    ```python
+    self.tasks_btn.pressed.connect(lambda: self.help_btn.setChecked(False))
+    ```
