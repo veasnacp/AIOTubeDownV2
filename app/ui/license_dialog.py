@@ -34,8 +34,7 @@ class LicenseDialog(LcBase, MessageBoxBase):
         self.title_layout.addWidget(self.close_btn)
 
         # Hardware ID section
-        self.hw_label = CaptionLabel(
-            "Your Hardware ID (Unique to this PC):", self)
+        self.hw_label = CaptionLabel("Your Hardware ID", self)
         self.hw_id_edit = LineEdit(self)
         # self.hw_id_edit.setText(license_manager.hw_id)
         self.hw_id_edit.setReadOnly(True)
@@ -47,28 +46,11 @@ class LicenseDialog(LcBase, MessageBoxBase):
         self.hw_row.addWidget(self.hw_id_edit)
         self.hw_row.addWidget(self.copy_btn)
 
-        # random calculation for security (simple)
-        self.calc_label = BodyLabel("Solve this math problem:")
-        self.random_btn = TransparentToolButton(FluentIcon.ROTATE, self)
-        self.random_btn.setFixedSize(QSize(20, 20))
-        self.random_btn.setIconSize(QSize(12, 12))
-        self.random_btn.setToolTip("Generate New Math Problem")
-        self.random_btn.clicked.connect(self._generate_random_math)
-        self.calc_edit = LineEdit()
-        self.calc_edit.setPlaceholderText("Answer")
-        self.calc_row = QHBoxLayout()
-        self.calc_row.addWidget(self.calc_label)
-        self.calc_row.addWidget(self.calc_edit)
-        self.calc_row.addWidget(self.random_btn)
-        self.calc_row.setAlignment(Qt.AlignCenter)
-
-        self._generate_random_math()
-        self.calc_edit.textChanged.connect(self._on_calc_changed)
-
         # License key section
         self.key_label = CaptionLabel("Enter License Key:", self)
         self.key_edit = LineEdit(self)
         self.key_edit.setPlaceholderText("XXXX-XXXX-XXXX-XXXX")
+        self.key_edit.textChanged.connect(self._on_key_changed)
 
         # Buttons
         self.buttonGroup.hide()
@@ -91,8 +73,6 @@ class LicenseDialog(LcBase, MessageBoxBase):
         self.viewLayout.addSpacing(15)
         self.viewLayout.addWidget(self.hw_label)
         self.viewLayout.addLayout(self.hw_row)
-        self.viewLayout.addSpacing(15)
-        self.viewLayout.addLayout(self.calc_row)
         self.viewLayout.addSpacing(15)
         self.viewLayout.addWidget(self.key_label)
         self.viewLayout.addWidget(self.key_edit)
@@ -123,6 +103,9 @@ class LicenseDialog(LcBase, MessageBoxBase):
         else:
             self.close()
 
+    def _on_verifying_status(self, status: str):
+        print("verifying status", status)
+
     def _on_activate_clicked(self):
         key = self.key_edit.text().strip()
         if not key:
@@ -130,7 +113,11 @@ class LicenseDialog(LcBase, MessageBoxBase):
                 "Required", "Please enter a license key", parent=self)
             return
 
-        if license_manager.activate(key):
+        self.handle_activation(key)
+
+    def _on_activation_result(self, result: int, output: str):
+        title, message = self._get_activation_result(result, output)
+        if result == 0:
             InfoBar.success(
                 "Activation Successful",
                 "Your application has been activated. Thank you!",
@@ -147,34 +134,8 @@ class LicenseDialog(LcBase, MessageBoxBase):
             )
             self.key_edit.setFocus()
 
-    @staticmethod
-    def generate_license_key(hw_id):
-        """Generate a license key for the given hardware ID"""
-        return hashlib.sha256((hw_id + "VeasNa").encode()).hexdigest().upper()[:16]
-
-    def _generate_random_math(self):
-        self.num1 = random.randint(1, 10)
-        self.num2 = random.randint(1, 10)
-        self.operator = random.choice(['+', '-', '*', '/'])
-        self.calc_label.setText(f"{self.num1} {self.operator} {self.num2} = ?")
-        self.calc_edit.clear()
-        if hasattr(self, "activate_btn"):
-            self.activate_btn.setEnabled(False)
-            self.key_edit.clear()
-
-    def _on_calc_changed(self, text):
-        try:
-            # Safe evaluation for simple math
-            expected = eval(f"{self.num1} {self.operator} {self.num2}")
-            if text == str(int(expected)):
-                self.activate_btn.setEnabled(True)
-                license_key = self.generate_license_key(license_manager.hw_id)
-                self.key_edit.setText(license_key)
-            else:
-                self.activate_btn.setEnabled(False)
-                self.key_edit.clear()
-        except:
-            self.activate_btn.setEnabled(False)
+    def _on_key_changed(self, text):
+        self.activate_btn.setEnabled(len(text) >= 16)
 
     def closeEvent(self, event):
         # if not license_manager.is_activated():

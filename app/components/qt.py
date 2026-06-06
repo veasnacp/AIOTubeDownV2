@@ -245,16 +245,8 @@ class LcBase:
             print(
                 f"❌ Startup check: Validation failed (code: {code}). Form active.")
 
-    def handle_activation(self):
-        key = self.key_input.strip()
-        if not key:
-            QMessageBox.warning(self, "Input Required",
-                                "❌ Please enter a license key to continue.")
-            return
-
+    def handle_activation(self, key: str):
         if not self._backend_url:
-            QMessageBox.warning(self, "Not Ready",
-                                "⏳ Backend config still loading. Please wait.")
             return
 
         self._on_verifying_status("CONNECTING TO CORE...")
@@ -267,7 +259,7 @@ class LcBase:
         self._thread.finished.connect(self._on_activation_result)
         self._thread.start()
 
-    def _on_activation_result(self, result: int, output: str):
+    def _get_activation_result(self, result: int, output: str):
         try:
             if result == 0:
                 return ("Success", "✅ License Activated! Galactic access granted.")
@@ -281,3 +273,6 @@ class LcBase:
                 return ("Access Denied", f"❌ Activation Failed (Error Code: {result})")
         finally:
             self._on_verifying_status("RE-INITIATE ACTIVATION")
+
+    def _on_activation_result(self, result: int, output: str):
+        self._get_activation_result(result, output)
