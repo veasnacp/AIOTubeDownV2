@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# chmod +x run_bot.sh allow permission first
 # Navigate to the script's directory
 cd "$(dirname "$0")"
 
