@@ -74,7 +74,7 @@ class WorkerSignals(QObject):
     filename_updated = Signal(int, str)  # task_id, real_filename
 
 
-class DownloadWorker(QRunnable):
+class DownloaderBase:
     def __init__(
         self,
         task_id,
@@ -84,26 +84,38 @@ class DownloadWorker(QRunnable):
         info: Optional[dict] = None,
         options: Optional[dict] = None
     ):
-        super().__init__()
         self.task_id = task_id
         self.url = url
         self.info = info
         self.output_dir = output_dir
         self.filename = filename
         self.options = options or {}
-        self.signals = WorkerSignals()
         self._is_paused = False
         self._is_cancelled = False
         self.chunk_size = 10485760
 
-    @Slot()
-    def run(self):
-        self.signals.status_changed.emit(self.task_id, "Downloading")
+    def status_changed(self, task_id: int, status: str):
+        pass
+
+    def progress(self, task_id: int, downloaded: int, total: int, speed: str, eta: str):
+        pass
+
+    def error(self, task_id: int, message: str):
+        pass
+
+    def finished(self, task_id: int, filepath: str):
+        pass
+
+    def filename_updated(self, task_id: int, filename: str):
+        pass
+
+    def pre_run(self):
+        self.status_changed(self.task_id, "Downloading")
 
         if self.info:
-            self.run_yt_dlp()
+            return self.run_yt_dlp()
         else:
-            self.run_yt_dlp()
+            return self.run_yt_dlp()
 
     def run_yt_dlp(self, override_url=None, filename=None):
         target_url = override_url or self.url
@@ -122,6 +134,7 @@ class DownloadWorker(QRunnable):
             res = "1440"
         elif res == "1080":
             res = "1080"
+        self.options.update({"resolution": res})
 
         # Format string for yt-dlp
         # Prefer mp4 for easier merging and compatibility
@@ -231,15 +244,17 @@ class DownloadWorker(QRunnable):
                         logger.error(f'Failed to save thumbnail: {e}')
 
                 self.filename = os.path.basename(final_path)
-                self.signals.filename_updated.emit(self.task_id, self.filename)
+                self.filename_updated(self.task_id, self.filename)
 
                 if not self._is_cancelled:
-                    self.signals.finished.emit(self.task_id, final_path)
-                    self.signals.status_changed.emit(self.task_id, "Completed")
+                    self.finished(self.task_id, final_path)
+                    self.status_changed(self.task_id, "Completed")
+
+                return final_path
         except Exception as e:
             if not self._is_cancelled:
                 logger.error(f"Download failed: {e}")
-                self.signals.error.emit(self.task_id, str(e))
+                self.error(self.task_id, str(e))
 
     def yt_dl_hook_wrapper(self, d):
         try:
@@ -269,15 +284,14 @@ class DownloadWorker(QRunnable):
             speed_str = self.format_speed(speed)
             eta_str = self.format_eta(eta)
 
-            self.signals.progress.emit(
-                self.task_id, downloaded, total, speed_str, eta_str)
+            self.progress(self.task_id, downloaded, total, speed_str, eta_str)
         elif d['status'] == 'finished':
             if has_ffmpeg:
-                self.signals.status_changed.emit(self.task_id, "Merging...")
+                self.status_changed(self.task_id, "Merging...")
                 time.sleep(0.5)
 
-            # self.signals.progress.emit(self.task_id, total, total, speed_str, eta_str)
-            self.signals.status_changed.emit(self.task_id, "Completed")
+            # self.progress(self.task_id, total, total, speed_str, eta_str)
+            self.status_changed(self.task_id, "Completed")
 
     def get_audio_url(self, info: dict, with_audio_info=False) -> str | dict | None:
         music_url = None
@@ -517,3 +531,35 @@ class DownloadWorker(QRunnable):
     def pause(self): self._is_paused = True
     def resume(self): self._is_paused = False
     def cancel(self): self._is_cancelled = True
+
+
+class DownloadWorker(QRunnable, DownloaderBase):
+    def __init__(
+        self,
+        task_id,
+        url,
+        output_dir,
+        filename,
+        info: Optional[dict] = None,
+        options: Optional[dict] = None
+    ):
+        QRunnable.__init__(self)
+        DownloaderBase.__init__(
+            self,
+            task_id,
+            url,
+            output_dir,
+            filename,
+            info,
+            options
+        )
+        self.signals = WorkerSignals()
+
+    @Slot()
+    def run(self):
+        self.signals.status_changed.emit(self.task_id, "Downloading")
+
+        if self.info:
+            self.run_yt_dlp()
+        else:
+            self.run_yt_dlp()

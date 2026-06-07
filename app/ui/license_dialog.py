@@ -7,7 +7,8 @@ from PySide6Addons import (MessageBoxBase, SubtitleLabel, LineEdit, PushButton,
                            PrimaryPushButton, FluentIcon, InfoBar, CaptionLabel,
                            BodyLabel)
 
-from ..core.license_manager import license_manager
+
+from ..config.constants import APP_NAME
 from ..components.override import TransparentToolButton
 from ..components.qt import LcBase
 
@@ -36,7 +37,8 @@ class LicenseDialog(LcBase, MessageBoxBase):
         # Hardware ID section
         self.hw_label = CaptionLabel("Your Hardware ID", self)
         self.hw_id_edit = LineEdit(self)
-        # self.hw_id_edit.setText(license_manager.hw_id)
+        self.hw_id = self._cache.get('hw_id') or ''
+        self.hw_id_edit.setText(self.hw_id.upper() if self.hw_id else '')
         self.hw_id_edit.setReadOnly(True)
 
         self.copy_btn = PushButton(FluentIcon.COPY, "Copy ID", self)
@@ -69,7 +71,7 @@ class LicenseDialog(LcBase, MessageBoxBase):
         self.viewLayout.addLayout(self.title_layout)
         self.viewLayout.addSpacing(10)
         self.viewLayout.addWidget(
-            QLabel("Please activate your license to continue using Download Manager."))
+            QLabel(f"Please activate your license to continue using {APP_NAME}."))
         self.viewLayout.addSpacing(15)
         self.viewLayout.addWidget(self.hw_label)
         self.viewLayout.addLayout(self.hw_row)
@@ -85,19 +87,21 @@ class LicenseDialog(LcBase, MessageBoxBase):
         self._load_backend_url()
 
     def _copy_hw_id(self):
-        QApplication.clipboard().setText(license_manager.hw_id)
+        QApplication.clipboard().setText(self.hw_id_edit.text().strip())
         InfoBar.success("Copied", "Hardware ID copied to clipboard",
                         duration=1500, parent=self)
 
     def _on_hwid_result(self, code: int, hwid: str):
         if code == 0:
-            self.hw_id_edit.setText(f"{hwid}".upper())
+            self._cache['hw_id'] = hwid.upper()
+            self.hw_id_edit.setText(self._cache['hw_id'])
         else:
             QMessageBox.warning(
                 self, "Warning", "⚠️ Unable to retrieve HWID. License activation may fail.")
 
     def _on_backend_url_result(self, code: int, url: str):
         if code == 0 and url:
+            self._cache['backend_url'] = url
             self._backend_url = url
             self.check_existing_activation()
         else:
@@ -118,6 +122,7 @@ class LicenseDialog(LcBase, MessageBoxBase):
     def _on_activation_result(self, result: int, output: str):
         title, message = self._get_activation_result(result, output)
         if result == 0:
+            self._cache['license_key'] = self.key_edit.text().strip().upper()
             InfoBar.success(
                 "Activation Successful",
                 "Your application has been activated. Thank you!",
@@ -128,7 +133,7 @@ class LicenseDialog(LcBase, MessageBoxBase):
         else:
             InfoBar.error(
                 "Activation Failed",
-                "Invalid license key for this hardware ID.",
+                "Invalid license key or Expired.",
                 duration=3000,
                 parent=self
             )

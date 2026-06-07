@@ -26,13 +26,10 @@ from ..config.constants import APP_VERSION_BETA
 from ..config.settings import settings
 from ..core.download_manager import manager
 from ..core.extract_manager import extract_manager
-from ..core.license_manager import license_manager
 from ..core.thumbnail_manager import thumbnail_manager
 from ..theme import Colors, DarkMode, LightMode
 from .downloader_page import DownloaderPage
 from .drama_downloader_page import DramaDownloaderPage
-from .license_dialog import LicenseDialog
-from .license_interface import LicenseInterface
 from .settings_page import SettingsPage
 from .sidebar import Sidebar
 
@@ -270,13 +267,6 @@ class MainWindow(MSFluentWindow):
         self.setProperty('theme', theme)
         self.update()
         setTheme(_theme)
-
-    def show_license_dialog(self):
-        if not license_manager.is_activated():
-            dialog = LicenseDialog(self)
-            if not dialog.exec():
-                logger.info("License activation cancelled. Exiting.")
-                dialog.close()
 
     def on_sidebar_item_clicked(self, item):
         route = item.property('routeKey')

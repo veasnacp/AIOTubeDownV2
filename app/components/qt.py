@@ -72,6 +72,7 @@ class LcBase:
     _API_XOR_KEY = 0x17
 
     _backend_url = None
+    _cache = {}
 
     def init_dll(self):
         """Load the Stealth DLL and prepare for galactic handshake."""
@@ -97,6 +98,9 @@ class LcBase:
             sys.exit(1)
 
     def _load_hwid(self):
+        if self._cache.get('hw_id'):
+            return
+
         token = self.generate_token().encode('utf-8')
         args_json = json.dumps([]).encode('utf-8')
         self._hwid_thread = LcThread(
@@ -213,6 +217,7 @@ class LcBase:
     def check_existing_activation(self):
         """Check if license is already active on startup and skip the form if valid."""
         code, cached_json = self.cached_activation()
+        print("cached_json", cached_json)
         if code == 0 and cached_json:
             try:
                 cached_data = json.loads(cached_json)
@@ -273,6 +278,7 @@ class LcBase:
                 return ("Access Denied", f"❌ Activation Failed (Error Code: {result})")
         finally:
             self._on_verifying_status("RE-INITIATE ACTIVATION")
+            self._on_verifying_status("FAILED")
 
     def _on_activation_result(self, result: int, output: str):
         self._get_activation_result(result, output)

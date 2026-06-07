@@ -17,3 +17,4 @@ dill
 pywin32
 tqdm
 yt-dlp
+telethon
