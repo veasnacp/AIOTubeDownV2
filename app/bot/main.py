@@ -13,8 +13,7 @@ from loguru import logger
 from telethon import TelegramClient, events
 from telethon.tl.types import DocumentAttributeVideo
 from yt_dlp import YoutubeDL
-
-
+from psutil import cpu_count
 
 from ..config.constants import APP_NAME
 from ..core.download_base import DownloaderBase
@@ -26,9 +25,14 @@ project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+cpu_core = cpu_count()
+if cpu_core is None:
+    cpu_core = 1
+elif cpu_core > 4:
+    cpu_core = cpu_core - 2
 
 # Queue for handling downloads sequentially (prevents Telegram blocks and CPU/network overload)
-task_queue = asyncio.Queue(4)
+task_queue = asyncio.Queue(cpu_core)
 
 # Load credentials from Environment or Settings Manager
 API_ID = int(os.environ.get("TELEGRAM_API_ID") or 0)
@@ -39,6 +43,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or ""
 URL_PATTERN = re.compile(r'https?://[^\s/$.?#].[^\s]*', re.IGNORECASE)
 
 LINK_APP = f"@{APP_NAME}_bot"
+
 
 def find_urls(text: str) -> list[str]:
     """Finds all URLs in a given string text"""
@@ -605,8 +610,8 @@ async def main():
                 'wait_msg': wait_msg
             })
 
-    # Start sequential queue worker in background
-    consumer_task = asyncio.create_task(queue_consumer())
+    # Start 4 parallel queue workers in background
+    consumer_tasks = [asyncio.create_task(queue_consumer()) for _ in range(4)]
 
     # Start bot client session
     await client.start(bot_token=BOT_TOKEN)
@@ -615,7 +620,8 @@ async def main():
     try:
         await client.run_until_disconnected()
     finally:
-        consumer_task.cancel()
+        for task in consumer_tasks:
+            task.cancel()
 
 
 if __name__ == '__main__':
