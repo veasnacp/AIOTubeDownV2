@@ -10,43 +10,8 @@ from urllib.parse import urlparse
 from loguru import logger
 from PySide6.QtCore import QObject, QThreadPool, Signal, Slot
 
-from ..extractor.douyin import DouyinExtractor
-
-# from ..extractor.instagram import InstagramExtractor
-from ..extractor.facebook import FacebookExtractor
-from ..extractor.kuaishou import KuaishouExtractor
-from ..extractor.tiktok import TikTokExtractor
-from ..extractor.youtube import YouTubeExtractor
 from ._worker import DefaultWorker, Slot
-
-TYPE_EXTRACTOR: TypeAlias = Union[
-    'YouTubeExtractor', 'TikTokExtractor',
-    'FacebookExtractor',
-    # 'InstagramExtractor',
-    'KuaishouExtractor', 'DouyinExtractor'
-]
-
-BASE_DOMAIN = {
-    "instagram": "instagram.com",
-    "tiktok": "tiktok.com",
-    "tiktok_redirect": "vt.tiktok.com",
-    "youtube": "youtube.com",
-    "youtube_short": "youtu.be",
-    "facebook": "facebook.com",
-    "kuaishou": "kuaishou.com",
-    "kuaishou_redirect": "v.kuaishou.com",
-    "douyin": "douyin.com",
-    "douyin_redirect": "v.douyin.com"
-}
-
-BASE_EXTRACTORS = {
-    # "instagram": InstagramExtractor,
-    "tiktok": TikTokExtractor,
-    "youtube": YouTubeExtractor,
-    "facebook": FacebookExtractor,
-    "kuaishou": KuaishouExtractor,
-    "douyin": DouyinExtractor,
-}
+from .constants import TYPE_EXTRACTOR, BASE_DOMAIN, BASE_EXTRACTORS, YouTubeExtractor
 
 
 def extract_url_list(url_list: list[str]):

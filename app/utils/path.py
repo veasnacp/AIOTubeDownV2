@@ -3,10 +3,13 @@ import subprocess
 import sys
 import time
 import urllib.parse
-import winreg
 
-import win32com.client
+try:
+    import winreg
 
+    import win32com.client
+except:
+    pass
 
 def split_filepath(filepath: str):
     """

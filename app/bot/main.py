@@ -15,10 +15,12 @@ from telethon.tl.types import DocumentAttributeVideo
 from yt_dlp import YoutubeDL
 
 
-from ..core.download_worker import DownloaderBase
-from ..core.extract_manager import extract_url_list, BASE_EXTRACTORS, TYPE_EXTRACTOR
-from ..config.settings import settings
+
+from ..config.constants import APP_NAME
+from ..core.download_base import DownloaderBase
+from ..core.constants import extract_url_list, BASE_EXTRACTORS, TYPE_EXTRACTOR
 from ..extractor._utils import safe_filename
+
 # Add project root to sys.path to run directly or as a module
 project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
@@ -26,19 +28,17 @@ if project_root not in sys.path:
 
 
 # Queue for handling downloads sequentially (prevents Telegram blocks and CPU/network overload)
-task_queue = asyncio.Queue()
+task_queue = asyncio.Queue(4)
 
 # Load credentials from Environment or Settings Manager
-API_ID = int(os.environ.get("TELEGRAM_API_ID")
-             or settings.get("telegram_api_id") or 0)
-API_HASH = os.environ.get("TELEGRAM_API_HASH") or settings.get(
-    "telegram_api_hash") or ""
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or settings.get(
-    "telegram_bot_token") or ""
+API_ID = int(os.environ.get("TELEGRAM_API_ID") or 0)
+API_HASH = os.environ.get("TELEGRAM_API_HASH") or ""
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or ""
 
 # URL regex pattern
 URL_PATTERN = re.compile(r'https?://[^\s/$.?#].[^\s]*', re.IGNORECASE)
 
+LINK_APP = f"@{APP_NAME}_bot"
 
 def find_urls(text: str) -> list[str]:
     """Finds all URLs in a given string text"""
@@ -244,13 +244,13 @@ async def extract_video_info_v1(url: str) -> list[dict]:
 
             # Load specific site cookies from settings if available
             cookie_key = f"{extractor_key}_cookie"
-            cookie_val = settings.get(cookie_key)
-            if hasattr(scout, "set_cookies") and cookie_val:
-                try:
-                    scout.set_cookies(cookie_val)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to set cookies for {extractor_key}: {e}")
+            # cookie_val = settings.get(cookie_key)
+            # if hasattr(scout, "set_cookies") and cookie_val:
+            #     try:
+            #         scout.set_cookies(cookie_val)
+            #     except Exception as e:
+            #         logger.error(
+            #             f"Failed to set cookies for {extractor_key}: {e}")
 
             if hasattr(scout, "get_video_info_list_yt_dlp"):
                 info_list = await scout.get_video_info_list_yt_dlp(url_list)
@@ -344,47 +344,46 @@ def download_media_v1(url: str, is_mp3: bool, temp_dir: str) -> str:
         return filename
 
 
-async def send_large_video(client: TelegramClient, chat: str, url: str, **kwargs):
-    try:
-        # 1. Download video data stream cleanly via curl_cffi
-        async with AsyncSession() as session:
-            response = await session.get(url, stream=True, timeout=None)
+async def send_large_video(client: TelegramClient, chat: str, url: str, filename: str, headers=None, **kwargs):
+    # 1. Download video data stream cleanly via curl_cffi
+    async with AsyncSession() as session:
+        response = await session.get(url, headers=headers, stream=True, timeout=None)
 
-            if response.status_code != 200:
-                raise Exception(
-                    f"Failed to fetch video: HTTP {response.status_code}")
+        if response.status_code != 200:
+            raise Exception(
+                f"Failed to fetch video: HTTP {response.status_code}")
 
-            video_stream = io.BytesIO()
-            async for chunk in response.aiter_content(chunk_size=65536):
-                video_stream.write(chunk)
+        video_stream = io.BytesIO()
+        async for chunk in response.aiter_content(chunk_size=65536):
+            video_stream.write(chunk)
 
-            video_stream.seek(0)
+        video_stream.seek(0)
 
-        # 2. Package dimensions and formatting parameters
-        # Replace these numbers with your video details if known (Duration, Width, Height)
-        # Standard placeholder values (like duration=0, w=1280, h=720) will force the layout change.
-        video_attributes = DocumentAttributeVideo(
-            # Duration in seconds (0 works as an auto-fallback)
-            duration=0,
-            w=1280,                   # Width pixel footprint
-            h=720,                    # Height pixel footprint
-            supports_streaming=True   # Explicitly inside the attributes wrapper
-        )
+    # 2. Package dimensions and formatting parameters
+    # Replace these numbers with your video details if known (Duration, Width, Height)
+    # Standard placeholder values (like duration=0, w=1280, h=720) will force the layout change.
+    video_attributes = DocumentAttributeVideo(
+        # Duration in seconds (0 works as an auto-fallback)
+        duration=0,
+        w=1280,                   # Width pixel footprint
+        h=720,                    # Height pixel footprint
+        supports_streaming=True   # Explicitly inside the attributes wrapper
+    )
 
-        # 3. Transmit video payload forcing a rendering box format
-        await client.send_file(
-            chat,
-            video_stream,
-            # Instructs Telegram to parse as a playable video box
-            attributes=[video_attributes],
-            force_document=False,            # Disables generic document wrapper fallback
-            video_note=False,
-            **kwargs
-        )
-        print("Video display layout sent successfully.")
-
-    except Exception as e:
-        print(f"Error handling large video display stream: {e}")
+    file_name = safe_filename(filename)
+    video_stream.name = file_name
+    # 3. Transmit video payload forcing a rendering box format
+    await client.send_file(
+        chat,
+        video_stream,
+        file_name=filename,
+        # Instructs Telegram to parse as a playable video box
+        attributes=[video_attributes],
+        force_document=False,            # Disables generic document wrapper fallback
+        video_note=False,
+        **kwargs
+    )
+    logger.info("Video display layout sent successfully.")
 
 
 async def process_task(task):
@@ -414,7 +413,8 @@ async def process_task(task):
     try:
         # Run blocking download in a separate thread pool thread
         filepath, video_url, audio_url = await asyncio.to_thread(download_media, url, info, is_mp3, temp_dir)
-        logger.info(f"Download completed: {filepath}")
+        if not "https:" in filepath:
+            logger.info(f"Download completed: {filepath}")
 
         if (is_force_download) and (not filepath or not os.path.exists(filepath)):
             await status_msg.edit("❌ **Download Failed.**\nCould not fetch the video stream from source.")
@@ -452,10 +452,12 @@ async def process_task(task):
             #     video_url = res.url
             #     logger.info(f"Video URL: {video_url}")
             target_send_file = video_url or filepath
+
+        if title and len(title) < 10:
+            title = f"{title} - {info.get('id') or APP_NAME}"
+
         try:
-            logger.info(f"is_force_download: {is_force_download}")
-            logger.info(f"cdn_url: {cdn_url}")
-            logger.info(f"send file: {not is_force_download and cdn_url}")
+            logger.info(f"http_headers: {info.get('http_headers')}")
             test = True
             if test:
                 logger.info(f"Sending large video: {target_send_file}")
@@ -463,8 +465,9 @@ async def process_task(task):
                     client=event.client,
                     chat=chat_id,
                     url=target_send_file,
-                    caption=f"🎥 **{title}**\n\nDownloaded via AIOTubeDown Bot",
-                    file_name=f"video.mp4",
+                    filename=f"{title or info.get('id') or 'video'}.mp4",
+                    headers=info.get('http_headers'),
+                    caption=f"🎥 **{title}**\n\nDownloaded via {LINK_APP}",
                     mime_type="video/mp4",
                     # attributes=attributes,
                     reply_to=event.message.id,
@@ -474,7 +477,7 @@ async def process_task(task):
                 await event.client.send_file(
                     chat_id,
                     target_send_file,
-                    caption=f"🎥 **{title}**\n\nDownloaded via AIOTubeDown Bot",
+                    caption=f"🎥 **{title}**\n\nDownloaded via {LINK_APP}",
                     attributes=attributes,
                     reply_to=event.message.id,
                     progress_callback=updater.callback
@@ -482,15 +485,22 @@ async def process_task(task):
         except Exception as e:
             logger.error(f"Failed to upload file {filepath}: {e}")
             # Send media message if available
+            is_force_download = extractor in ['youtube']
+
+            if not is_force_download and not cdn_url:
+                res = request("GET", video_url,
+                              impersonate="chrome120", allow_redirects=True)
+                video_url = res.url
+
             if video_url and audio_url:
                 await event.client.send_message(
-                    chat_id, f"🎥 **{title}**\n\n[Download Link]({video_url})\n[Audio Download Link]({audio_url})\n\nDownloaded via AIOTubeDown Bot", reply_to=event.message.id)
+                    chat_id, f"🎥 **{title}**\n\n[Download Link]({video_url})\n[Audio Download Link]({audio_url})\n\nDownloaded via {LINK_APP}", reply_to=event.message.id)
             elif video_url:
                 await event.client.send_message(
-                    chat_id, f"🎥 **{title}**\n\n[Download Link]({video_url})\n\nDownloaded via AIOTubeDown Bot", reply_to=event.message.id)
+                    chat_id, f"🎥 **{title}**\n\n[Download Link]({video_url})\n\nDownloaded via {LINK_APP}", reply_to=event.message.id)
             elif audio_url:
                 await event.client.send_message(
-                    chat_id, f"🎥 **{title}**\n\n[Download Link]({audio_url})\n\nDownloaded via AIOTubeDown Bot", reply_to=event.message.id)
+                    chat_id, f"🎥 **{title}**\n\n[Download Link]({audio_url})\n\nDownloaded via {LINK_APP}", reply_to=event.message.id)
 
         # Remove status message once file is uploaded successfully
         await status_msg.delete()
@@ -533,7 +543,7 @@ async def main():
     @client.on(events.NewMessage(pattern='/start'))
     async def start_handler(event):
         await event.reply(
-            "👋 **Welcome to AIOTubeDown Bot!**\n\n"
+            f"👋 **Welcome to {LINK_APP}!**\n\n"
             "Send me any video/audio link from YouTube, TikTok, Facebook, Douyin, Kuaishou, etc., "
             "and I will download and send it to you.\n\n"
             "💡 **Commands:**\n"
@@ -580,7 +590,8 @@ async def main():
                 f"⏳ **Request Queued!**\n"
                 f"🔗 Link: `{url}`\n"
                 f"👥 Position in queue: `{position}`\n"
-                f"Please wait. We process requests sequentially to avoid rate-limiting blocks."
+                f"Please wait. Too many process requests are queued at the moment."
+                # f"Please wait. We process requests sequentially to avoid rate-limiting blocks."
             )
 
             # Add to sequential processing queue

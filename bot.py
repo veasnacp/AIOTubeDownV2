@@ -18,10 +18,10 @@ def load_dotenv(path: str = '.env'):
 # Load environment variables from .env file before imports
 load_dotenv()
 
-from app.bot.main import main
+from app.bot.main import main as run_bot
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        asyncio.run(run_bot())
     except KeyboardInterrupt:
         print("\nBot stopped by user.")
